@@ -34,12 +34,12 @@ export const RoomList: React.FC<RoomListProps> = ({
   return (
     <div className="relative mb-5">
       <div className="flex items-center justify-between mb-2 px-1">
-        <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
           Ambientes do Imóvel ({rooms.length})
         </span>
         <button
           onClick={onAddRoom}
-          className="flex items-center gap-1 text-xs font-bold text-brand-400 hover:text-brand-300 transition-colors"
+          className="flex items-center gap-1 text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>Novo Cômodo</span>
@@ -50,14 +50,14 @@ export const RoomList: React.FC<RoomListProps> = ({
       <div className="relative group">
         <button
           onClick={() => scroll('left')}
-          className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700 items-center justify-center text-slate-300 hover:text-white shadow-lg backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity"
+          className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-200 items-center justify-center text-slate-600 hover:text-slate-900 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
 
         <button
           onClick={() => scroll('right')}
-          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700 items-center justify-center text-slate-300 hover:text-white shadow-lg backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity"
+          className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-slate-200 items-center justify-center text-slate-600 hover:text-slate-900 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -79,12 +79,12 @@ export const RoomList: React.FC<RoomListProps> = ({
                 onClick={() => onSelectRoom(room.id)}
                 className={`relative shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all duration-200 ${
                   isActive
-                    ? 'bg-brand-600 text-white border-brand-500 shadow-lg shadow-brand-600/30 ring-2 ring-brand-400/30'
-                    : 'bg-slate-900/90 text-slate-300 border-slate-800 hover:border-slate-700 hover:bg-slate-800/80'
+                    ? 'bg-brand-600 text-white border-brand-600 shadow-md shadow-brand-600/25 ring-2 ring-brand-400/30'
+                    : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
-                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
                 }`}>
                   {index + 1}
                 </span>
@@ -93,7 +93,7 @@ export const RoomList: React.FC<RoomListProps> = ({
 
                 {/* Items & Photos badge */}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
-                  isActive ? 'bg-black/20 text-brand-100' : 'bg-slate-800 text-slate-400'
+                  isActive ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-600'
                 }`}>
                   {room.items.length} {room.items.length === 1 ? 'item' : 'itens'}{totalPhotos > 0 ? ` • ${totalPhotos}📷` : ''}
                 </span>
@@ -114,7 +114,7 @@ export const RoomList: React.FC<RoomListProps> = ({
           {/* Add Room Quick Card */}
           <button
             onClick={onAddRoom}
-            className="shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-dashed border-slate-700 hover:border-brand-500/80 bg-slate-900/50 hover:bg-slate-800/60 text-slate-400 hover:text-brand-400 text-xs font-bold transition-all"
+            className="shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-dashed border-slate-300 hover:border-brand-500 bg-white hover:bg-brand-50/50 text-slate-500 hover:text-brand-600 text-xs font-bold transition-all"
           >
             <Plus className="w-4 h-4" />
             <span>Adicionar</span>

@@ -125,23 +125,23 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
         
         {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 sticky top-0 z-10">
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+            <div className="w-8 h-8 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
               <Database className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-white">Backup e Integração Nuvem</h2>
-              <p className="text-xs text-slate-400">Exporte seus dados localmente ou integre com o Supabase</p>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900">Backup e Nuvem Supabase</h2>
+              <p className="text-xs text-slate-500">Exporte seus dados ou sincronize com seu banco na nuvem</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -151,31 +151,31 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
         <div className="p-5 overflow-y-auto space-y-5 flex-1 text-xs sm:text-sm">
           
           {/* 1. Local JSON Backup & Restore */}
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
-            <h3 className="text-xs font-bold text-brand-400 uppercase tracking-wider flex items-center gap-1.5">
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+            <h3 className="text-xs font-bold text-brand-700 uppercase tracking-wider flex items-center gap-1.5">
               <FileJson className="w-4 h-4" />
               Backup em Arquivo (JSON)
             </h3>
-            <p className="text-xs text-slate-300">
-              Baixe o arquivo completo da vistoria (com todas as fotos e cômodos) para guardar ou transferir para outro dispositivo.
+            <p className="text-xs text-slate-600">
+              Baixe o arquivo completo da vistoria (com todas as fotos e cômodos) para guardar ou transferir para outro computador/celular.
             </p>
 
             <div className="flex flex-wrap gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={handleExportJson}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold border border-slate-700 transition-all active:scale-95"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-800 font-bold border border-slate-200 shadow-sm transition-all active:scale-95"
               >
-                <DownloadCloud className="w-4 h-4 text-brand-400" />
+                <DownloadCloud className="w-4 h-4 text-brand-600" />
                 <span>Exportar Arquivo (.json)</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold shadow-sm transition-all"
               >
-                <UploadCloud className="w-4 h-4 text-emerald-400" />
+                <UploadCloud className="w-4 h-4 text-emerald-600" />
                 <span>Restaurar / Importar (.json)</span>
               </button>
               <input
@@ -189,51 +189,51 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
           </div>
 
           {/* 2. Supabase Integration Setup */}
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+              <h3 className="text-xs font-bold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
                 <Server className="w-4 h-4" />
                 Sincronização em Nuvem (Supabase)
               </h3>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30">
-                Opcional
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-bold border border-indigo-200">
+                Ativo
               </span>
             </div>
 
-            <p className="text-xs text-slate-300">
-              Conecte sua conta do <strong>Supabase</strong> para salvar os laudos automaticamente no banco de dados PostgreSQL e fotos nos Buckets.
+            <p className="text-xs text-slate-600">
+              Seus laudos são salvos no banco de dados PostgreSQL do <strong>Supabase</strong> na nuvem.
             </p>
 
             <div className="space-y-3 pt-1">
               <div>
-                <label className="block text-slate-300 font-medium mb-1 text-xs">Supabase Project URL</label>
+                <label className="block text-slate-700 font-bold mb-1 text-xs">Supabase Project URL</label>
                 <input
                   type="text"
                   value={config.url}
                   onChange={(e) => setConfig((prev) => ({ ...prev, url: e.target.value }))}
                   placeholder="https://xyzproject.supabase.co"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1 text-xs">Supabase Anon Key / Public API Key</label>
+                <label className="block text-slate-700 font-bold mb-1 text-xs">Supabase Anon Key / Public API Key</label>
                 <input
                   type="password"
                   value={config.anonKey}
                   onChange={(e) => setConfig((prev) => ({ ...prev, anonKey: e.target.value }))}
                   placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 text-xs focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               {testResult && (
-                <div className={`p-3 rounded-lg border text-xs flex items-center gap-2 ${
+                <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
                   testResult.success 
-                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200' 
-                    : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
                 }`}>
-                  {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />}
+                  {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" /> : <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />}
                   <span>{testResult.message}</span>
                 </div>
               )}
@@ -243,9 +243,9 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
                   type="button"
                   onClick={handleTestSupabase}
                   disabled={isTesting}
-                  className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200 shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50"
                 >
-                  {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Server className="w-3.5 h-3.5" />}
+                  {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Server className="w-3.5 h-3.5 text-slate-500" />}
                   <span>Testar e Salvar Conexão</span>
                 </button>
 
@@ -253,7 +253,7 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
                   type="button"
                   onClick={handleSyncToSupabase}
                   disabled={isSyncing || !config.url}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/30 flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
                   <span>Enviar Vistoria para Nuvem</span>
@@ -265,10 +265,10 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-800 flex justify-end bg-slate-900/90">
+        <div className="p-4 border-t border-slate-200 flex justify-end bg-white">
           <button
             onClick={onClose}
-            className="px-5 py-2 text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
+            className="px-5 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
           >
             Fechar
           </button>

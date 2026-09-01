@@ -58,10 +58,10 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     <button
       type="button"
       onClick={toggleListening}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md ${
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
         isListening
-          ? 'bg-rose-600 text-white animate-recording ring-4 ring-rose-500/30'
-          : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+          ? 'bg-rose-600 text-white animate-recording ring-4 ring-rose-300 shadow-md'
+          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-sm'
       } ${className}`}
       title={isListening ? 'Parar gravação' : 'Ditar descrição por voz'}
     >
@@ -73,7 +73,7 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
         </>
       ) : (
         <>
-          <Mic className="w-3.5 h-3.5 text-brand-400" />
+          <Mic className="w-3.5 h-3.5 text-brand-600" />
           <span>Ditar por Voz</span>
         </>
       )}

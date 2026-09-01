@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { 
   Plus, 
   FileText, 
-  Building, 
-  PenTool
+  PenTool,
+  Mic,
+  LayoutDashboard
 } from 'lucide-react';
 import type { 
   InspectionData, 
@@ -13,10 +14,10 @@ import type {
   SupabaseConfig,
   InspectionType
 } from './types/inspection';
-import { INSPECTION_TEMPLATES } from './data/templates';
 import { 
   saveInspectionToDb, 
   getAllInspectionsFromDb, 
+  deleteInspectionFromDb,
   getAppProfile, 
   saveAppProfile 
 } from './services/db';
@@ -24,6 +25,8 @@ import {
 // Components
 import { ToastProvider, useToast } from './components/Toast';
 import { Navbar } from './components/Navbar';
+import { LobbyView } from './components/LobbyView';
+import { AudioInspectionView } from './components/AudioInspectionView';
 import { PropertyHeaderCard } from './components/PropertyHeaderCard';
 import { RoomList } from './components/RoomList';
 import { RoomDetail } from './components/RoomDetail';
@@ -34,54 +37,55 @@ import { PhotoViewerModal } from './components/PhotoViewerModal';
 import { SignatureModal } from './components/SignatureModal';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { BackupSyncModal } from './components/BackupSyncModal';
-import { InspectionsHistoryModal } from './components/InspectionsHistoryModal';
 
-const createDefaultInspection = (): InspectionData => {
-  const defaultTemplate = INSPECTION_TEMPLATES[0]; // Apartamento Padrão
-  const rooms: Room[] = defaultTemplate.rooms.map((r, rIdx) => ({
-    id: `room-${rIdx + 1}`,
-    name: r.name,
-    items: r.items.map((itemName, iIdx) => ({
-      id: `item-${rIdx + 1}-${iIdx + 1}`,
-      name: itemName,
-      status: 'Bom',
-      description: '',
-      needRepair: false,
-      photos: [],
-    })),
-  }));
-
+// Clean, zero-mock new inspection helper
+const createEmptyInspection = (): InspectionData => {
   const today = new Date().toISOString().split('T')[0];
   const currentTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
   return {
     id: `insp-${Date.now()}`,
-    title: 'Vistoria de Entrada - Imóvel Residencial',
+    title: 'Nova Vistoria Imobiliária',
     inspectionType: 'Entrada',
     date: today,
     time: currentTime,
-    inspectorName: 'Carlos Mendonça',
-    inspectorCpfCreci: 'CRECI 45.892-F',
-    tenantName: 'Mariana Silva Souza',
-    tenantCpf: '321.654.987-00',
-    ownerName: 'Roberto Albuquerque',
-    propertyAddress: 'Rua das Palmeiras',
-    propertyNumber: '450',
-    propertyComplement: 'Apto 102 Bloco B',
-    propertyNeighborhood: 'Jardins',
-    propertyCity: 'São Paulo',
-    propertyState: 'SP',
-    propertyZip: '01423-001',
-    companyName: 'Imobiliária Alpha Prime',
-    companyCnpj: '12.345.678/0001-90',
-    companyPhone: '(11) 3254-8800',
-    waterMeter: '00412 m³',
-    energyMeter: '13840 kWh',
-    gasMeter: '0092 m³',
-    keysInfo: '02 chaves da porta principal e 01 controle da garagem',
-    generalObservations: 'O locatário declara estar de acordo com o estado do imóvel registrado neste laudo fotográfico.',
+    inspectorName: '',
+    inspectorCpfCreci: '',
+    tenantName: '',
+    tenantCpf: '',
+    ownerName: '',
+    propertyAddress: '',
+    propertyNumber: '',
+    propertyComplement: '',
+    propertyNeighborhood: '',
+    propertyCity: '',
+    propertyState: '',
+    propertyZip: '',
+    companyName: '',
+    companyCnpj: '',
+    companyPhone: '',
+    waterMeter: '',
+    energyMeter: '',
+    gasMeter: '',
+    keysInfo: '',
+    generalObservations: '',
     useGovBrSignatures: false,
-    rooms,
+    rooms: [
+      {
+        id: `room-${Date.now()}-1`,
+        name: 'Sala de Estar',
+        items: [
+          {
+            id: `item-${Date.now()}-1`,
+            name: 'Paredes e Pintura',
+            status: 'Bom',
+            description: '',
+            needRepair: false,
+            photos: [],
+          },
+        ],
+      },
+    ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -90,7 +94,11 @@ const createDefaultInspection = (): InspectionData => {
 function MainApp() {
   const { showToast } = useToast();
 
-  const [inspection, setInspection] = useState<InspectionData>(createDefaultInspection);
+  // Navigation: 'lobby' | 'inspection' | 'audio-inspection'
+  const [currentView, setCurrentView] = useState<'lobby' | 'inspection' | 'audio-inspection'>('lobby');
+
+  const [inspectionsList, setInspectionsList] = useState<InspectionData[]>([]);
+  const [currentInspection, setCurrentInspection] = useState<InspectionData>(createEmptyInspection);
   const [activeRoomId, setActiveRoomId] = useState<string>('');
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig | undefined>();
 
@@ -100,7 +108,6 @@ function MainApp() {
   const [isSignaturesOpen, setIsSignaturesOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isBackupSyncOpen, setIsBackupSyncOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [selectedItemForEdit, setSelectedItemForEdit] = useState<InspectionItem | null>(null);
 
@@ -111,7 +118,18 @@ function MainApp() {
     caption: '',
   });
 
-  // Load from IndexedDB on initial mount
+  const reloadInspections = async () => {
+    try {
+      const list = await getAllInspectionsFromDb();
+      setInspectionsList(list);
+      return list;
+    } catch (e) {
+      console.warn('Error loading inspections list', e);
+      return [];
+    }
+  };
+
+  // Initial load
   useEffect(() => {
     async function loadData() {
       try {
@@ -120,58 +138,119 @@ function MainApp() {
           setSupabaseConfig(profile.supabaseConfig);
         }
 
-        const list = await getAllInspectionsFromDb();
+        const list = await reloadInspections();
         if (list.length > 0) {
-          setInspection(list[0]);
+          setCurrentInspection(list[0]);
           if (list[0].rooms.length > 0) {
             setActiveRoomId(list[0].rooms[0].id);
           }
-        } else {
-          const initial = createDefaultInspection();
-          if (profile) {
-            if (profile.companyName) initial.companyName = profile.companyName;
-            if (profile.companyCnpj) initial.companyCnpj = profile.companyCnpj;
-            if (profile.companyPhone) initial.companyPhone = profile.companyPhone;
-            if (profile.companyLogo) initial.companyLogo = profile.companyLogo;
-            if (profile.defaultInspectorName) initial.inspectorName = profile.defaultInspectorName;
-            if (profile.defaultInspectorCpfCreci) initial.inspectorCpfCreci = profile.defaultInspectorCpfCreci;
-          }
-          setInspection(initial);
-          if (initial.rooms.length > 0) {
-            setActiveRoomId(initial.rooms[0].id);
-          }
-          await saveInspectionToDb(initial);
         }
       } catch (err) {
-        console.error('Error loading IndexedDB data', err);
+        console.error('Error loading data', err);
       }
     }
 
     loadData();
   }, []);
 
-  // Set active room if not set
+  // Sync active room when current inspection changes
   useEffect(() => {
-    if (!activeRoomId && inspection.rooms.length > 0) {
-      setActiveRoomId(inspection.rooms[0].id);
+    if (currentInspection.rooms.length > 0) {
+      const exists = currentInspection.rooms.some((r) => r.id === activeRoomId);
+      if (!exists) {
+        setActiveRoomId(currentInspection.rooms[0].id);
+      }
+    } else {
+      setActiveRoomId('');
     }
-  }, [activeRoomId, inspection.rooms]);
+  }, [currentInspection, activeRoomId]);
 
-  // Auto-save to IndexedDB with debounce
+  // Auto-save current inspection to IndexedDB with debounce
   useEffect(() => {
-    const timer = setTimeout(() => {
-      saveInspectionToDb(inspection).catch((e) => console.warn('Autosave error', e));
-    }, 400);
+    if (currentInspection && currentInspection.id) {
+      const timer = setTimeout(() => {
+        saveInspectionToDb(currentInspection)
+          .then(() => reloadInspections())
+          .catch((e) => console.warn('Autosave error', e));
+      }, 400);
 
-    return () => clearTimeout(timer);
-  }, [inspection]);
+      return () => clearTimeout(timer);
+    }
+  }, [currentInspection]);
 
   // Handlers
+  const handleSelectInspectionFromLobby = (selected: InspectionData) => {
+    setCurrentInspection(selected);
+    if (selected.rooms.length > 0) {
+      setActiveRoomId(selected.rooms[0].id);
+    }
+    setCurrentView('inspection');
+  };
+
+  const handleStartNewInspection = async () => {
+    const profile = await getAppProfile();
+    const fresh = createEmptyInspection();
+
+    if (profile) {
+      if (profile.companyName) fresh.companyName = profile.companyName;
+      if (profile.companyCnpj) fresh.companyCnpj = profile.companyCnpj;
+      if (profile.companyPhone) fresh.companyPhone = profile.companyPhone;
+      if (profile.companyLogo) fresh.companyLogo = profile.companyLogo;
+      if (profile.defaultInspectorName) fresh.inspectorName = profile.defaultInspectorName;
+      if (profile.defaultInspectorCpfCreci) fresh.inspectorCpfCreci = profile.defaultInspectorCpfCreci;
+    }
+
+    await saveInspectionToDb(fresh);
+    await reloadInspections();
+    setCurrentInspection(fresh);
+    setActiveRoomId(fresh.rooms[0]?.id || '');
+    setCurrentView('inspection');
+    showToast('Nova vistoria criada com sucesso!', 'success');
+  };
+
+  const handleDeleteInspection = async (id: string, title: string) => {
+    if (window.confirm(`Deseja realmente excluir a vistoria "${title}"?`)) {
+      await deleteInspectionFromDb(id);
+      const remaining = await reloadInspections();
+      if (currentInspection.id === id) {
+        if (remaining.length > 0) {
+          setCurrentInspection(remaining[0]);
+        } else {
+          setCurrentInspection(createEmptyInspection());
+        }
+      }
+      showToast('Vistoria excluída com sucesso.', 'info');
+    }
+  };
+
+  const handleDuplicateInspection = async (source: InspectionData, newType: InspectionType) => {
+    const duplicated: InspectionData = {
+      ...source,
+      id: `insp-${Date.now()}`,
+      title: `${source.title || 'Vistoria'} (${newType})`,
+      inspectionType: newType,
+      date: new Date().toISOString().split('T')[0],
+      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      inspectorSignature: undefined,
+      tenantSignature: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveInspectionToDb(duplicated);
+    await reloadInspections();
+    setCurrentInspection(duplicated);
+    if (duplicated.rooms.length > 0) {
+      setActiveRoomId(duplicated.rooms[0].id);
+    }
+    setCurrentView('inspection');
+    showToast(`Vistoria duplicada como "${newType}" com sucesso!`, 'success');
+  };
+
   const handleUpdateInspectionData = (partial: Partial<InspectionData>) => {
-    setInspection((prev) => {
+    setCurrentInspection((prev) => {
       const updated = { ...prev, ...partial, updatedAt: new Date().toISOString() };
       
-      // Also update saved profile defaults for future use
       if (partial.companyName || partial.companyLogo || partial.inspectorName) {
         saveAppProfile({
           companyName: updated.companyName,
@@ -201,7 +280,7 @@ function MainApp() {
       })),
     }));
 
-    setInspection((prev) => ({
+    setCurrentInspection((prev) => ({
       ...prev,
       rooms: newRooms,
       updatedAt: new Date().toISOString(),
@@ -233,7 +312,7 @@ function MainApp() {
       ],
     };
 
-    setInspection((prev) => ({
+    setCurrentInspection((prev) => ({
       ...prev,
       rooms: [...prev.rooms, newRoom],
       updatedAt: new Date().toISOString(),
@@ -244,7 +323,7 @@ function MainApp() {
   };
 
   const handleUpdateActiveRoom = (updatedRoom: Room) => {
-    setInspection((prev) => ({
+    setCurrentInspection((prev) => ({
       ...prev,
       rooms: prev.rooms.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)),
       updatedAt: new Date().toISOString(),
@@ -252,15 +331,15 @@ function MainApp() {
   };
 
   const handleDeleteActiveRoom = () => {
-    if (inspection.rooms.length <= 1) {
+    if (currentInspection.rooms.length <= 1) {
       showToast('A vistoria precisa conter pelo menos um ambiente.', 'error');
       return;
     }
 
-    const currentRoom = inspection.rooms.find((r) => r.id === activeRoomId);
+    const currentRoom = currentInspection.rooms.find((r) => r.id === activeRoomId);
     if (window.confirm(`Deseja realmente excluir o ambiente "${currentRoom?.name}" e todos os seus itens?`)) {
-      const remainingRooms = inspection.rooms.filter((r) => r.id !== activeRoomId);
-      setInspection((prev) => ({
+      const remainingRooms = currentInspection.rooms.filter((r) => r.id !== activeRoomId);
+      setCurrentInspection((prev) => ({
         ...prev,
         rooms: remainingRooms,
         updatedAt: new Date().toISOString(),
@@ -276,7 +355,7 @@ function MainApp() {
   };
 
   const handleSaveItem = (savedItem: InspectionItem) => {
-    setInspection((prev) => {
+    setCurrentInspection((prev) => {
       return {
         ...prev,
         rooms: prev.rooms.map((room) => {
@@ -297,33 +376,16 @@ function MainApp() {
     });
   };
 
-  const handleNewInspection = () => {
-    if (window.confirm('Deseja iniciar uma nova vistoria? Os dados atuais serão substituídos.')) {
-      const fresh = createDefaultInspection();
-      setInspection(fresh);
-      setActiveRoomId(fresh.rooms[0]?.id || '');
-      showToast('Nova vistoria iniciada!', 'success');
-    }
-  };
-
-  const handleDuplicateAsType = (source: InspectionData, newType: InspectionType) => {
-    const duplicated: InspectionData = {
-      ...source,
-      id: `insp-${Date.now()}`,
-      title: `${source.title || 'Vistoria'} (${newType})`,
-      inspectionType: newType,
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      inspectorSignature: undefined,
-      tenantSignature: undefined,
-      createdAt: new Date().toISOString(),
+  const handleSaveAudioRooms = (audioRooms: Room[]) => {
+    setCurrentInspection((prev) => ({
+      ...prev,
+      rooms: [...prev.rooms, ...audioRooms],
       updatedAt: new Date().toISOString(),
-    };
-    setInspection(duplicated);
-    if (duplicated.rooms.length > 0) {
-      setActiveRoomId(duplicated.rooms[0].id);
+    }));
+    if (audioRooms.length > 0) {
+      setActiveRoomId(audioRooms[0].id);
     }
-    showToast(`Vistoria duplicada como "${newType}" com sucesso!`, 'success');
+    setCurrentView('inspection');
   };
 
   const handleSaveSignatures = (signatures: {
@@ -331,27 +393,28 @@ function MainApp() {
     tenantSignature?: string;
     useGovBrSignatures?: boolean;
   }) => {
-    setInspection((prev) => ({
+    setCurrentInspection((prev) => ({
       ...prev,
       ...signatures,
       updatedAt: new Date().toISOString(),
     }));
   };
 
-  const activeRoom = inspection.rooms.find((r) => r.id === activeRoomId) || inspection.rooms[0];
-  const totalPhotosCount = inspection.rooms.reduce(
+  const activeRoom = currentInspection.rooms.find((r) => r.id === activeRoomId) || currentInspection.rooms[0];
+  const totalPhotosCount = currentInspection.rooms.reduce(
     (acc, r) => acc + r.items.reduce((iAcc, item) => iAcc + item.photos.length, 0),
     0
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-brand-500 selection:text-white pb-24 md:pb-8">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-brand-500 selection:text-white pb-24 md:pb-8">
       
       {/* 1. Corporate Navbar */}
       <Navbar
-        inspectionType={inspection.inspectionType}
-        onNewInspection={handleNewInspection}
-        onOpenHistory={() => setIsHistoryOpen(true)}
+        currentView={currentView}
+        onNavigate={(view) => setCurrentView(view)}
+        inspectionType={currentInspection.inspectionType}
+        inspectionTitle={currentInspection.title}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenPropertyInfo={() => setIsPropertyInfoOpen(true)}
         onOpenSignatures={() => setIsSignaturesOpen(true)}
@@ -361,76 +424,116 @@ function MainApp() {
         totalPhotos={totalPhotosCount}
       />
 
-      {/* 2. Main Content Container */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 flex-1 w-full">
+      {/* 2. Main Content Router */}
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 w-full">
         
-        {/* Property Header Summary Card */}
-        <PropertyHeaderCard
-          data={inspection}
-          onEdit={() => setIsPropertyInfoOpen(true)}
-        />
+        {/* VIEW 1: LOBBY / DASHBOARD */}
+        {currentView === 'lobby' && (
+          <LobbyView
+            inspections={inspectionsList}
+            onSelectInspection={handleSelectInspectionFromLobby}
+            onNewInspection={handleStartNewInspection}
+            onOpenAudioInspection={() => setCurrentView('audio-inspection')}
+            onOpenTemplates={() => setIsTemplatesOpen(true)}
+            onDuplicateInspection={handleDuplicateInspection}
+            onDeleteInspection={handleDeleteInspection}
+            onOpenCloudSync={() => setIsBackupSyncOpen(true)}
+          />
+        )}
 
-        {/* Room Navigation Tabs */}
-        <RoomList
-          rooms={inspection.rooms}
-          activeRoomId={activeRoomId}
-          onSelectRoom={(id) => setActiveRoomId(id)}
-          onAddRoom={handleAddRoom}
-        />
-
-        {/* Active Room Detail View */}
-        {activeRoom ? (
-          <RoomDetail
-            room={activeRoom}
-            onUpdateRoom={handleUpdateActiveRoom}
-            onDeleteRoom={handleDeleteActiveRoom}
-            onOpenItemEditor={handleOpenItemEditor}
+        {/* VIEW 2: AUDIO INSPECTION & PHOTO ATTRIBUTION */}
+        {currentView === 'audio-inspection' && (
+          <AudioInspectionView
+            onBack={() => setCurrentView('lobby')}
+            onSaveToInspection={handleSaveAudioRooms}
             onViewPhoto={(url, caption) => setPhotoViewer({ isOpen: true, url, caption })}
           />
-        ) : (
-          <div className="p-12 text-center text-slate-500">
-            Nenhum cômodo selecionado.
+        )}
+
+        {/* VIEW 3: ACTIVE INSPECTION WORKSPACE */}
+        {currentView === 'inspection' && (
+          <div className="space-y-4">
+            
+            {/* Property Header Summary Card */}
+            <PropertyHeaderCard
+              data={currentInspection}
+              onEdit={() => setIsPropertyInfoOpen(true)}
+            />
+
+            {/* Room Navigation Tabs */}
+            <RoomList
+              rooms={currentInspection.rooms}
+              activeRoomId={activeRoomId}
+              onSelectRoom={(id) => setActiveRoomId(id)}
+              onAddRoom={handleAddRoom}
+            />
+
+            {/* Active Room Detail View */}
+            {activeRoom ? (
+              <RoomDetail
+                room={activeRoom}
+                onUpdateRoom={handleUpdateActiveRoom}
+                onDeleteRoom={handleDeleteActiveRoom}
+                onOpenItemEditor={handleOpenItemEditor}
+                onViewPhoto={(url, caption) => setPhotoViewer({ isOpen: true, url, caption })}
+              />
+            ) : (
+              <div className="p-12 text-center text-slate-400 bg-white rounded-3xl border border-slate-200">
+                Nenhum cômodo selecionado. Toque em "+ Novo Cômodo" para começar.
+              </div>
+            )}
+
           </div>
         )}
 
       </main>
 
-      {/* 3. Mobile Bottom Action Bar (Fixed on Small Screens) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-4 py-2 safe-bottom shadow-2xl flex items-center justify-around">
-        <button
-          onClick={() => setIsPropertyInfoOpen(true)}
-          className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white"
-        >
-          <Building className="w-5 h-5 text-sky-400" />
-          <span className="text-[10px] font-semibold">Imóvel</span>
-        </button>
+      {/* 3. Mobile Bottom Action Bar (Fixed on Small Screens during Inspection) */}
+      {currentView === 'inspection' && (
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-2 safe-bottom shadow-2xl flex items-center justify-around">
+          <button
+            onClick={() => setCurrentView('lobby')}
+            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-slate-900"
+          >
+            <LayoutDashboard className="w-5 h-5 text-slate-600" />
+            <span className="text-[10px] font-bold">Lobby</span>
+          </button>
 
-        <button
-          onClick={() => handleOpenItemEditor(null)}
-          className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-brand-400"
-        >
-          <div className="w-10 h-10 rounded-full bg-brand-600 flex items-center justify-center text-white -mt-5 shadow-lg shadow-brand-600/40 border-2 border-slate-950">
-            <Plus className="w-5 h-5" />
-          </div>
-          <span className="text-[10px] font-bold text-white">Item</span>
-        </button>
+          <button
+            onClick={() => setCurrentView('audio-inspection')}
+            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-indigo-600"
+          >
+            <Mic className="w-5 h-5 text-indigo-600" />
+            <span className="text-[10px] font-bold">Áudio</span>
+          </button>
 
-        <button
-          onClick={() => setIsSignaturesOpen(true)}
-          className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white"
-        >
-          <PenTool className="w-5 h-5 text-emerald-400" />
-          <span className="text-[10px] font-semibold">Assinar</span>
-        </button>
+          <button
+            onClick={() => handleOpenItemEditor(null)}
+            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-brand-600"
+          >
+            <div className="w-10 h-10 rounded-full bg-brand-600 flex items-center justify-center text-white -mt-5 shadow-lg shadow-brand-600/30 border-2 border-white">
+              <Plus className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-bold text-slate-800">Item</span>
+          </button>
 
-        <button
-          onClick={() => setIsPdfPreviewOpen(true)}
-          className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white"
-        >
-          <FileText className="w-5 h-5 text-brand-400" />
-          <span className="text-[10px] font-semibold">Laudo PDF</span>
-        </button>
-      </nav>
+          <button
+            onClick={() => setIsSignaturesOpen(true)}
+            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-emerald-600"
+          >
+            <PenTool className="w-5 h-5 text-emerald-600" />
+            <span className="text-[10px] font-bold">Assinar</span>
+          </button>
+
+          <button
+            onClick={() => setIsPdfPreviewOpen(true)}
+            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-brand-600"
+          >
+            <FileText className="w-5 h-5 text-brand-600" />
+            <span className="text-[10px] font-bold">PDF</span>
+          </button>
+        </nav>
+      )}
 
       {/* --- MODALS --- */}
 
@@ -438,7 +541,7 @@ function MainApp() {
       <PropertyInfoModal
         isOpen={isPropertyInfoOpen}
         onClose={() => setIsPropertyInfoOpen(false)}
-        data={inspection}
+        data={currentInspection}
         onSave={handleUpdateInspectionData}
       />
 
@@ -471,11 +574,11 @@ function MainApp() {
       <SignatureModal
         isOpen={isSignaturesOpen}
         onClose={() => setIsSignaturesOpen(false)}
-        inspectorName={inspection.inspectorName}
-        tenantName={inspection.tenantName}
-        inspectorSignature={inspection.inspectorSignature}
-        tenantSignature={inspection.tenantSignature}
-        useGovBrSignatures={inspection.useGovBrSignatures}
+        inspectorName={currentInspection.inspectorName}
+        tenantName={currentInspection.tenantName}
+        inspectorSignature={currentInspection.inspectorSignature}
+        tenantSignature={currentInspection.tenantSignature}
+        useGovBrSignatures={currentInspection.useGovBrSignatures}
         onSave={handleSaveSignatures}
       />
 
@@ -483,41 +586,28 @@ function MainApp() {
       <PdfPreviewModal
         isOpen={isPdfPreviewOpen}
         onClose={() => setIsPdfPreviewOpen(false)}
-        data={inspection}
+        data={currentInspection}
       />
 
       {/* Backup & Supabase Sync Modal */}
       <BackupSyncModal
         isOpen={isBackupSyncOpen}
         onClose={() => setIsBackupSyncOpen(false)}
-        data={inspection}
-        onRestoreData={(restored) => {
-          setInspection(restored);
+        data={currentInspection}
+        onRestoreData={async (restored) => {
+          await saveInspectionToDb(restored);
+          await reloadInspections();
+          setCurrentInspection(restored);
           if (restored.rooms.length > 0) {
             setActiveRoomId(restored.rooms[0].id);
           }
+          setCurrentView('inspection');
         }}
         supabaseConfig={supabaseConfig}
         onSaveSupabaseConfig={(cfg) => {
           setSupabaseConfig(cfg);
           saveAppProfile({ supabaseConfig: cfg });
         }}
-      />
-
-      {/* Inspections History Modal */}
-      <InspectionsHistoryModal
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        currentInspectionId={inspection.id}
-        onSelectInspection={(selected) => {
-          setInspection(selected);
-          if (selected.rooms.length > 0) {
-            setActiveRoomId(selected.rooms[0].id);
-          }
-          showToast(`Vistoria "${selected.title}" aberta!`, 'info');
-        }}
-        onNewInspection={handleNewInspection}
-        onDuplicateAsType={handleDuplicateAsType}
       />
 
     </div>

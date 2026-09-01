@@ -11,18 +11,18 @@ export const SmartSuggestions: React.FC<SmartSuggestionsProps> = ({ onSelectSugg
   const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0);
 
   return (
-    <div className="bg-slate-950/60 rounded-xl border border-slate-800/80 p-3 space-y-2">
+    <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3 space-y-2">
       <div className="flex items-center justify-between">
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 text-xs font-bold text-brand-400 hover:text-brand-300 transition-colors"
+          className="flex items-center gap-1.5 text-xs font-bold text-brand-600 hover:text-brand-700 transition-colors"
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>Sugestões Inteligentes de Termos Técnicos</span>
           {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
-        <span className="text-[10px] text-slate-500 hidden sm:inline">Toque para inserir</span>
+        <span className="text-[10px] text-slate-400 hidden sm:inline">Toque para inserir</span>
       </div>
 
       {isOpen && (
@@ -34,10 +34,10 @@ export const SmartSuggestions: React.FC<SmartSuggestionsProps> = ({ onSelectSugg
                 key={cat.title}
                 type="button"
                 onClick={() => setSelectedCategoryIndex(idx)}
-                className={`shrink-0 text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-colors ${
+                className={`shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors ${
                   selectedCategoryIndex === idx
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 {cat.title}
@@ -52,7 +52,7 @@ export const SmartSuggestions: React.FC<SmartSuggestionsProps> = ({ onSelectSugg
                 key={index}
                 type="button"
                 onClick={() => onSelectSuggestion(suggestion)}
-                className="text-left text-xs bg-slate-800/70 hover:bg-brand-900/40 hover:border-brand-500/50 border border-slate-700/60 text-slate-200 hover:text-brand-200 px-2.5 py-1.5 rounded-lg transition-all active:scale-95"
+                className="text-left text-xs bg-white hover:bg-brand-50 hover:border-brand-300 border border-slate-200 text-slate-700 hover:text-brand-700 px-2.5 py-1.5 rounded-xl transition-all shadow-sm active:scale-95"
               >
                 + {suggestion}
               </button>

@@ -85,20 +85,20 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 backdrop-blur-md overflow-hidden">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl h-[95vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/60 backdrop-blur-md overflow-hidden">
+      <div className="bg-white border border-slate-200 w-full max-w-5xl h-[95vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
         
         {/* Modal Header */}
-        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900 sticky top-0 z-10">
+        <div className="px-4 sm:px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-brand-500/20 border border-brand-500/30 flex items-center justify-center text-brand-400">
-              <FileText className="w-4 h-4" />
+            <div className="w-9 h-9 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600">
+              <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm sm:text-base font-bold text-white leading-tight">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
                 Pré-visualização do Laudo de Vistoria
               </h2>
-              <p className="text-[11px] text-slate-400 truncate max-w-[280px] sm:max-w-md">
+              <p className="text-[11px] text-slate-500 truncate max-w-[280px] sm:max-w-md">
                 {fileName}
               </p>
             </div>
@@ -107,7 +107,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrint}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-colors"
               title="Imprimir"
             >
               <Printer className="w-3.5 h-3.5" />
@@ -117,7 +117,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
             <button
               onClick={handleDownload}
               disabled={isGenerating || !pdfUrl}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-brand-600/30 transition-all active:scale-95 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-brand-600/20 transition-all active:scale-95 disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
               <span>Baixar PDF</span>
@@ -125,7 +125,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -133,20 +133,20 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
         </div>
 
         {/* PDF Viewer Body */}
-        <div className="flex-1 bg-slate-950 p-2 sm:p-4 relative flex items-center justify-center overflow-hidden">
+        <div className="flex-1 bg-slate-100 p-2 sm:p-4 relative flex items-center justify-center overflow-hidden">
           {isGenerating ? (
-            <div className="flex flex-col items-center justify-center gap-3 text-slate-400">
-              <Loader2 className="w-8 h-8 animate-spin text-brand-400" />
-              <p className="text-xs font-semibold">Renderizando fotos em alta resolução e diagramando PDF...</p>
+            <div className="flex flex-col items-center justify-center gap-3 text-slate-600">
+              <Loader2 className="w-8 h-8 animate-spin text-brand-600" />
+              <p className="text-xs font-semibold">Renderizando fotos em alta resolução e gerando PDF com 3 fotos por linha...</p>
             </div>
           ) : pdfUrl ? (
             <iframe
               src={pdfUrl}
               title="PDF Preview"
-              className="w-full h-full rounded-xl border border-slate-800 shadow-2xl bg-white"
+              className="w-full h-full rounded-2xl border border-slate-300 shadow-xl bg-white"
             />
           ) : (
-            <div className="text-center text-slate-500 text-xs">
+            <div className="text-center text-slate-400 text-xs">
               Falha ao carregar pré-visualização.
             </div>
           )}
