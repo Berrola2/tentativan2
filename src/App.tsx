@@ -35,6 +35,7 @@ import { Navbar } from './components/Navbar';
 import { LobbyView } from './components/LobbyView';
 import { LoginView } from './components/LoginView';
 import { UserManagementModal } from './components/UserManagementModal';
+import { ProtectedClientViewer } from './components/ProtectedClientViewer';
 import { AudioInspectionView } from './components/AudioInspectionView';
 import { PropertyHeaderCard } from './components/PropertyHeaderCard';
 import { RoomList } from './components/RoomList';
@@ -127,6 +128,29 @@ function MainApp() {
   const [inspectionToDelete, setInspectionToDelete] = useState<{ id: string; title: string } | null>(null);
   const [isDeleteActiveRoomOpen, setIsDeleteActiveRoomOpen] = useState(false);
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+
+  // Public client viewing token mode
+  const [clientInspection, setClientInspection] = useState<InspectionData | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const laudoId = params.get('laudo') || params.get('viewToken');
+    if (laudoId) {
+      getAllInspectionsFromDb().then((all) => {
+        const found = all.find((i) => i.id === laudoId);
+        if (found) {
+          setClientInspection(found);
+        } else {
+          fetchInspectionsFromSupabase().then((res) => {
+            const remoteFound = res.data?.find((i) => i.id === laudoId);
+            if (remoteFound) {
+              setClientInspection(remoteFound);
+            }
+          });
+        }
+      });
+    }
+  }, []);
 
   // Photo viewer state
   const [photoViewer, setPhotoViewer] = useState<{ isOpen: boolean; url: string; caption?: string }>({
@@ -470,7 +494,20 @@ function MainApp() {
     0
   );
 
-  // If user is not logged in, render the secure LoginView
+  // If accessed via client share link (View-Only mode for Tenant/Landlord)
+  if (clientInspection) {
+    return (
+      <ProtectedClientViewer
+        inspection={clientInspection}
+        onBack={() => {
+          window.history.pushState({}, '', window.location.pathname);
+          setClientInspection(null);
+        }}
+      />
+    );
+  }
+
+  // If employee is not logged in, render the secure LoginView
   if (!authSession) {
     return (
       <LoginView

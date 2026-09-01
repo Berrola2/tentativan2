@@ -131,13 +131,26 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => {
+                const shareableUrl = `${window.location.origin}/?laudo=${data.id}`;
+                navigator.clipboard.writeText(shareableUrl);
+                showToast('Link seguro copiado! Envie para o Locatário ou Locador.', 'success');
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition-all active:scale-95"
+              title="Copiar link de visualização protegida para o cliente"
+            >
+              <Share2 className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="hidden sm:inline">Link Cliente</span>
+            </button>
+
+            <button
               onClick={handleShare}
               disabled={isGenerating || !pdfUrl}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-95 disabled:opacity-50"
               title="Compartilhar direto no WhatsApp ou outro aplicativo"
             >
               <Share2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Compartilhar</span>
+              <span className="hidden sm:inline">WhatsApp</span>
             </button>
 
             <button
