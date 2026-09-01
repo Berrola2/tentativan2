@@ -3,7 +3,6 @@ import {
   FileText, 
   Sparkles, 
   Building, 
-  PenTool, 
   DownloadCloud, 
   FileCheck2, 
   LayoutDashboard,
@@ -18,7 +17,6 @@ interface NavbarProps {
   inspectionTitle?: string;
   onOpenTemplates?: () => void;
   onOpenPropertyInfo?: () => void;
-  onOpenSignatures?: () => void;
   onOpenBackupSync: () => void;
   onGeneratePdf?: () => void;
   isGeneratingPdf?: boolean;
@@ -32,7 +30,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   inspectionTitle,
   onOpenTemplates,
   onOpenPropertyInfo,
-  onOpenSignatures,
   onOpenBackupSync,
   onGeneratePdf,
   isGeneratingPdf = false,
@@ -129,18 +126,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Building className="w-3.5 h-3.5 text-brand-600" />
                 <span className="hidden sm:inline">Imóvel</span>
-              </button>
-            )}
-
-            {/* Signatures Button */}
-            {currentView === 'inspection' && onOpenSignatures && (
-              <button
-                onClick={onOpenSignatures}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-bold rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition-all"
-                title="Assinatura Touch / Gov.br"
-              >
-                <PenTool className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="hidden sm:inline">Assinar</span>
               </button>
             )}
 

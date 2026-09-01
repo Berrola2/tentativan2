@@ -290,73 +290,49 @@ export async function generateInspectionPdf(data: InspectionData): Promise<jsPDF
 
   // --- 6. SIGNATURES BLOCK ---
   checkNewPage(48);
-
-  doc.setFillColor(241, 245, 249);
-  doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(marginX, currentY, contentWidth, 42, 3, 3, 'FD');
+  // --- 6. SIGNATURES & FINAL DECLARATION ---
+  checkNewPage(45);
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(marginX, currentY, contentWidth, 42, 3, 3, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(marginX, currentY, contentWidth, 42, 3, 3, 'D');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
   doc.text('DECLARAÇÃO DE CONFORMIDADE E ASSINATURAS', marginX + 5, currentY + 6);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text('As partes declaram que conferiram as informações deste laudo de vistoria e concordam com as condições registradas.', marginX + 5, currentY + 11);
+  doc.text('As partes declaram que conferiram as informações deste laudo de vistoria e concordam com as condições e fotos registradas.', marginX + 5, currentY + 11);
 
   const sigBoxWidth = (contentWidth - 15) / 2;
 
-  // Inspector Signature (Left)
+  // Inspector Signature Line (Left)
   const leftSigX = marginX + 5;
-  if (data.inspectorSignature) {
-    try {
-      doc.addImage(data.inspectorSignature, 'PNG', leftSigX + 15, currentY + 14, 45, 15);
-    } catch (e) {
-      console.warn('Inspector signature error', e);
-    }
-  } else if (data.useGovBrSignatures) {
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(7.5);
-    doc.setTextColor(2, 132, 199);
-    doc.text('Assinado digitalmente via Gov.br / ICP-Brasil', leftSigX + 8, currentY + 22);
-  }
-
   doc.setDrawColor(148, 163, 184);
-  doc.line(leftSigX, currentY + 31, leftSigX + sigBoxWidth, currentY + 31);
+  doc.line(leftSigX, currentY + 28, leftSigX + sigBoxWidth, currentY + 28);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
-  doc.text(data.inspectorName || 'Vistoriador Responsável', leftSigX + sigBoxWidth / 2, currentY + 35, { align: 'center' });
+  doc.text(data.inspectorName || 'Vistoriador Responsável', leftSigX + sigBoxWidth / 2, currentY + 32, { align: 'center' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  doc.text(data.inspectorCpfCreci || 'Vistoriador / Avaliador', leftSigX + sigBoxWidth / 2, currentY + 39, { align: 'center' });
+  doc.text(data.inspectorCpfCreci ? `CPF/CRECI: ${data.inspectorCpfCreci}` : 'Vistoriador / Avaliador', leftSigX + sigBoxWidth / 2, currentY + 36, { align: 'center' });
 
-  // Tenant Signature (Right)
+  // Tenant Signature Line (Right)
   const rightSigX = marginX + 10 + sigBoxWidth;
-  if (data.tenantSignature) {
-    try {
-      doc.addImage(data.tenantSignature, 'PNG', rightSigX + 15, currentY + 14, 45, 15);
-    } catch (e) {
-      console.warn('Tenant signature error', e);
-    }
-  } else if (data.useGovBrSignatures) {
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(7.5);
-    doc.setTextColor(2, 132, 199);
-    doc.text('Assinado digitalmente via Gov.br / ICP-Brasil', rightSigX + 8, currentY + 22);
-  }
-
-  doc.line(rightSigX, currentY + 31, rightSigX + sigBoxWidth, currentY + 31);
+  doc.line(rightSigX, currentY + 28, rightSigX + sigBoxWidth, currentY + 28);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
-  doc.text(data.tenantName || 'Locatário / Inquilino', rightSigX + sigBoxWidth / 2, currentY + 35, { align: 'center' });
+  doc.text(data.tenantName || 'Locatário / Inquilino', rightSigX + sigBoxWidth / 2, currentY + 32, { align: 'center' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  doc.text(data.tenantCpf ? `CPF: ${data.tenantCpf}` : 'Locatário / Responsável', rightSigX + sigBoxWidth / 2, currentY + 39, { align: 'center' });
+  doc.text(data.tenantCpf ? `CPF: ${data.tenantCpf}` : 'Locatário / Responsável', rightSigX + sigBoxWidth / 2, currentY + 36, { align: 'center' });
 
   // --- 7. NUMBERING OF PAGES & FOOTERS ON ALL PAGES ---
   const totalPages = doc.getNumberOfPages();

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Plus, 
   FileText, 
-  PenTool,
+  Building,
   Mic,
   LayoutDashboard
 } from 'lucide-react';
@@ -34,7 +34,6 @@ import { PropertyInfoModal } from './components/PropertyInfoModal';
 import { TemplateSelectorModal } from './components/TemplateSelectorModal';
 import { ItemEditorModal } from './components/ItemEditorModal';
 import { PhotoViewerModal } from './components/PhotoViewerModal';
-import { SignatureModal } from './components/SignatureModal';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { BackupSyncModal } from './components/BackupSyncModal';
 import { AddRoomModal } from './components/AddRoomModal';
@@ -107,7 +106,6 @@ function MainApp() {
   // Modals state
   const [isPropertyInfoOpen, setIsPropertyInfoOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [isSignaturesOpen, setIsSignaturesOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isBackupSyncOpen, setIsBackupSyncOpen] = useState(false);
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
@@ -395,18 +393,6 @@ function MainApp() {
     setCurrentView('inspection');
   };
 
-  const handleSaveSignatures = (signatures: {
-    inspectorSignature?: string;
-    tenantSignature?: string;
-    useGovBrSignatures?: boolean;
-  }) => {
-    setCurrentInspection((prev) => ({
-      ...prev,
-      ...signatures,
-      updatedAt: new Date().toISOString(),
-    }));
-  };
-
   const activeRoom = currentInspection.rooms.find((r) => r.id === activeRoomId) || currentInspection.rooms[0];
   const totalPhotosCount = currentInspection.rooms.reduce(
     (acc, r) => acc + r.items.reduce((iAcc, item) => iAcc + item.photos.length, 0),
@@ -424,7 +410,6 @@ function MainApp() {
         inspectionTitle={currentInspection.title}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenPropertyInfo={() => setIsPropertyInfoOpen(true)}
-        onOpenSignatures={() => setIsSignaturesOpen(true)}
         onOpenBackupSync={() => setIsBackupSyncOpen(true)}
         onGeneratePdf={() => setIsPdfPreviewOpen(true)}
         isGeneratingPdf={false}
@@ -525,11 +510,11 @@ function MainApp() {
           </button>
 
           <button
-            onClick={() => setIsSignaturesOpen(true)}
-            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-emerald-600"
+            onClick={() => setIsPropertyInfoOpen(true)}
+            className="flex flex-col items-center gap-0.5 text-slate-500 hover:text-brand-600"
           >
-            <PenTool className="w-5 h-5 text-emerald-600" />
-            <span className="text-[10px] font-bold">Assinar</span>
+            <Building className="w-5 h-5 text-brand-600" />
+            <span className="text-[10px] font-bold">Imóvel</span>
           </button>
 
           <button
@@ -575,18 +560,6 @@ function MainApp() {
         onClose={() => setPhotoViewer((prev) => ({ ...prev, isOpen: false }))}
         photoUrl={photoViewer.url}
         caption={photoViewer.caption}
-      />
-
-      {/* Signatures Modal */}
-      <SignatureModal
-        isOpen={isSignaturesOpen}
-        onClose={() => setIsSignaturesOpen(false)}
-        inspectorName={currentInspection.inspectorName}
-        tenantName={currentInspection.tenantName}
-        inspectorSignature={currentInspection.inspectorSignature}
-        tenantSignature={currentInspection.tenantSignature}
-        useGovBrSignatures={currentInspection.useGovBrSignatures}
-        onSave={handleSaveSignatures}
       />
 
       {/* PDF Preview & Download Modal */}
