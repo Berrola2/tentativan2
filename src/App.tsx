@@ -37,6 +37,8 @@ import { PhotoViewerModal } from './components/PhotoViewerModal';
 import { SignatureModal } from './components/SignatureModal';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { BackupSyncModal } from './components/BackupSyncModal';
+import { AddRoomModal } from './components/AddRoomModal';
+import { ConfirmModal } from './components/ConfirmModal';
 
 // Clean, zero-mock new inspection helper
 const createEmptyInspection = (): InspectionData => {
@@ -109,7 +111,10 @@ function MainApp() {
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isBackupSyncOpen, setIsBackupSyncOpen] = useState(false);
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
+  const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
   const [selectedItemForEdit, setSelectedItemForEdit] = useState<InspectionItem | null>(null);
+  const [inspectionToDelete, setInspectionToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleteActiveRoomOpen, setIsDeleteActiveRoomOpen] = useState(false);
 
   // Photo viewer state
   const [photoViewer, setPhotoViewer] = useState<{ isOpen: boolean; url: string; caption?: string }>({
@@ -208,19 +213,24 @@ function MainApp() {
     showToast('Nova vistoria criada com sucesso!', 'success');
   };
 
-  const handleDeleteInspection = async (id: string, title: string) => {
-    if (window.confirm(`Deseja realmente excluir a vistoria "${title}"?`)) {
-      await deleteInspectionFromDb(id);
-      const remaining = await reloadInspections();
-      if (currentInspection.id === id) {
-        if (remaining.length > 0) {
-          setCurrentInspection(remaining[0]);
-        } else {
-          setCurrentInspection(createEmptyInspection());
-        }
+  const handleDeleteInspection = (id: string, title: string) => {
+    setInspectionToDelete({ id, title });
+  };
+
+  const confirmDeleteInspection = async () => {
+    if (!inspectionToDelete) return;
+    const { id } = inspectionToDelete;
+    await deleteInspectionFromDb(id);
+    const remaining = await reloadInspections();
+    if (currentInspection.id === id) {
+      if (remaining.length > 0) {
+        setCurrentInspection(remaining[0]);
+      } else {
+        setCurrentInspection(createEmptyInspection());
       }
-      showToast('Vistoria excluída com sucesso.', 'info');
     }
+    showToast('Vistoria excluída com sucesso.', 'info');
+    setInspectionToDelete(null);
   };
 
   const handleDuplicateInspection = async (source: InspectionData, newType: InspectionType) => {
@@ -293,10 +303,7 @@ function MainApp() {
     showToast(`Modelo "${template.name}" aplicado com ${newRooms.length} cômodos!`, 'success');
   };
 
-  const handleAddRoom = () => {
-    const roomName = window.prompt('Digite o nome do novo ambiente (Ex: Varanda Gourmet, Lavabo, Garagem):');
-    if (!roomName || !roomName.trim()) return;
-
+  const handleCreateRoom = (roomName: string) => {
     const newRoom: Room = {
       id: `room-${Date.now()}`,
       name: roomName.trim(),
@@ -335,18 +342,18 @@ function MainApp() {
       showToast('A vistoria precisa conter pelo menos um ambiente.', 'error');
       return;
     }
+    setIsDeleteActiveRoomOpen(true);
+  };
 
-    const currentRoom = currentInspection.rooms.find((r) => r.id === activeRoomId);
-    if (window.confirm(`Deseja realmente excluir o ambiente "${currentRoom?.name}" e todos os seus itens?`)) {
-      const remainingRooms = currentInspection.rooms.filter((r) => r.id !== activeRoomId);
-      setCurrentInspection((prev) => ({
-        ...prev,
-        rooms: remainingRooms,
-        updatedAt: new Date().toISOString(),
-      }));
-      setActiveRoomId(remainingRooms[0]?.id || '');
-      showToast('Ambiente excluído.', 'info');
-    }
+  const confirmDeleteActiveRoom = () => {
+    const remainingRooms = currentInspection.rooms.filter((r) => r.id !== activeRoomId);
+    setCurrentInspection((prev) => ({
+      ...prev,
+      rooms: remainingRooms,
+      updatedAt: new Date().toISOString(),
+    }));
+    setActiveRoomId(remainingRooms[0]?.id || '');
+    showToast('Ambiente excluído.', 'info');
   };
 
   const handleOpenItemEditor = (itemToEdit: InspectionItem | null) => {
@@ -465,7 +472,7 @@ function MainApp() {
               rooms={currentInspection.rooms}
               activeRoomId={activeRoomId}
               onSelectRoom={(id) => setActiveRoomId(id)}
-              onAddRoom={handleAddRoom}
+              onAddRoom={() => setIsAddRoomOpen(true)}
             />
 
             {/* Active Room Detail View */}
@@ -608,6 +615,35 @@ function MainApp() {
           setSupabaseConfig(cfg);
           saveAppProfile({ supabaseConfig: cfg });
         }}
+      />
+
+      {/* Add Room In-App Modal */}
+      <AddRoomModal
+        isOpen={isAddRoomOpen}
+        onClose={() => setIsAddRoomOpen(false)}
+        onAddRoom={handleCreateRoom}
+      />
+
+      {/* Confirm Delete Inspection In-App Modal */}
+      <ConfirmModal
+        isOpen={!!inspectionToDelete}
+        onClose={() => setInspectionToDelete(null)}
+        onConfirm={confirmDeleteInspection}
+        title="Excluir Vistoria"
+        message={`Deseja realmente excluir a vistoria "${inspectionToDelete?.title || 'esta vistoria'}"? Todos os cômodos e fotos serão removidos permanentemente.`}
+        confirmText="Sim, Excluir Vistoria"
+        confirmVariant="danger"
+      />
+
+      {/* Confirm Delete Room In-App Modal */}
+      <ConfirmModal
+        isOpen={isDeleteActiveRoomOpen}
+        onClose={() => setIsDeleteActiveRoomOpen(false)}
+        onConfirm={confirmDeleteActiveRoom}
+        title="Excluir Ambiente"
+        message={`Deseja realmente excluir o ambiente "${activeRoom?.name || 'este ambiente'}" e todos os itens e fotos contidos nele?`}
+        confirmText="Sim, Excluir Ambiente"
+        confirmVariant="danger"
       />
 
     </div>

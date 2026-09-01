@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { InspectionData, InspectionType } from '../types/inspection';
 import { getAllInspectionsFromDb, deleteInspectionFromDb } from '../services/db';
+import { ConfirmModal } from './ConfirmModal';
 import { useToast } from './Toast';
 
 interface InspectionsHistoryModalProps {
@@ -35,13 +36,14 @@ export const InspectionsHistoryModal: React.FC<InspectionsHistoryModalProps> = (
   const [inspections, setInspections] = useState<InspectionData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; title: string } | null>(null);
 
   const loadList = async () => {
     try {
       const list = await getAllInspectionsFromDb();
       setInspections(list);
-    } catch (e) {
-      console.warn('Error loading history', e);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -51,18 +53,21 @@ export const InspectionsHistoryModal: React.FC<InspectionsHistoryModalProps> = (
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
-  const handleDelete = async (e: React.MouseEvent, id: string, title: string) => {
+  const handleDelete = (e: React.MouseEvent, id: string, title: string) => {
     e.stopPropagation();
     if (inspections.length <= 1) {
       showToast('Você precisa manter pelo menos uma vistoria.', 'error');
       return;
     }
-    if (window.confirm(`Deseja excluir a vistoria "${title}"?`)) {
-      await deleteInspectionFromDb(id);
+    setItemToDelete({ id, title });
+  };
+
+  const confirmDelete = async () => {
+    if (itemToDelete) {
+      await deleteInspectionFromDb(itemToDelete.id);
       await loadList();
       showToast('Vistoria excluída com sucesso.', 'info');
+      setItemToDelete(null);
     }
   };
 
@@ -274,6 +279,18 @@ export const InspectionsHistoryModal: React.FC<InspectionsHistoryModalProps> = (
         </div>
 
       </div>
+
+      {/* Confirm Delete In-App Modal */}
+      <ConfirmModal
+        isOpen={!!itemToDelete}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={confirmDelete}
+        title="Excluir Vistoria"
+        message={`Deseja excluir a vistoria "${itemToDelete?.title || 'esta vistoria'}"?`}
+        confirmText="Sim, Excluir"
+        confirmVariant="danger"
+      />
+
     </div>
   );
 };

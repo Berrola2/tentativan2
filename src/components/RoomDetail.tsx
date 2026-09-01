@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { Room, InspectionItem } from '../types/inspection';
 import { ItemCard } from './ItemCard';
+import { ConfirmModal } from './ConfirmModal';
 import { useToast } from './Toast';
 
 interface RoomDetailProps {
@@ -46,6 +47,7 @@ export const RoomDetail: React.FC<RoomDetailProps> = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(room.name);
   const [showNotes, setShowNotes] = useState(!!room.generalNotes);
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const handleSaveName = () => {
     if (nameInput.trim()) {
@@ -78,13 +80,14 @@ export const RoomDetail: React.FC<RoomDetailProps> = ({
     showToast(`"${itemName}" adicionado ao cômodo!`, 'success');
   };
 
-  const handleDeleteItem = (itemId: string, itemName: string) => {
-    if (window.confirm(`Deseja realmente excluir o item "${itemName}"?`)) {
+  const confirmDeleteItem = () => {
+    if (itemToDelete) {
       onUpdateRoom({
         ...room,
-        items: room.items.filter((i) => i.id !== itemId),
+        items: room.items.filter((i) => i.id !== itemToDelete.id),
       });
-      showToast(`Item "${itemName}" excluído.`, 'info');
+      showToast(`Item "${itemToDelete.name}" excluído.`, 'info');
+      setItemToDelete(null);
     }
   };
 
@@ -265,7 +268,7 @@ export const RoomDetail: React.FC<RoomDetailProps> = ({
                 key={item.id}
                 item={item}
                 onEdit={() => onOpenItemEditor(item)}
-                onDelete={() => handleDeleteItem(item.id, item.name)}
+                onDelete={() => setItemToDelete({ id: item.id, name: item.name })}
                 onViewPhoto={onViewPhoto}
                 onAddPhotos={(newPhotos) => handleUpdateItemPhotos(item.id, newPhotos)}
               />
@@ -286,6 +289,17 @@ export const RoomDetail: React.FC<RoomDetailProps> = ({
           </div>
         )}
       </div>
+
+      {/* Confirm Delete Item Modal */}
+      <ConfirmModal
+        isOpen={!!itemToDelete}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={confirmDeleteItem}
+        title="Excluir Item Vistoriado"
+        message={`Tem certeza que deseja excluir o item "${itemToDelete?.name}" e todas as fotos vinculadas a ele? Esta ação não pode ser desfeita.`}
+        confirmText="Sim, Excluir Item"
+        confirmVariant="danger"
+      />
 
     </div>
   );
