@@ -41,26 +41,25 @@ export async function generateInspectionPdf(data: InspectionData): Promise<jsPDF
   doc.setFillColor(15, 23, 42); // slate-900
   doc.rect(0, 0, pageWidth, 28, 'F');
 
-  // Company logo or default icon
-  if (data.companyLogo) {
-    try {
-      doc.addImage(data.companyLogo, 'PNG', marginX, 4, 20, 20);
-    } catch (e) {
-      console.warn('Could not add logo to PDF', e);
-    }
+  // Company logo (custom or default Vistoria YZZY)
+  const logoToUse = data.companyLogo || '/logo.jpg';
+  try {
+    doc.addImage(logoToUse, 'JPEG', marginX, 4, 20, 20);
+  } catch (e) {
+    console.warn('Could not add logo to PDF', e);
   }
 
   // Header Title
-  const headerTextX = data.companyLogo ? marginX + 24 : marginX;
+  const headerTextX = marginX + 24;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text(data.companyName || 'LAUDO DE VISTORIA IMOBILIÁRIA', headerTextX, 12);
+  doc.text(data.companyName || 'VISTORIA YZZY - LAUDO TÉCNICO', headerTextX, 12);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(148, 163, 184); // slate-400
-  const subHeader = data.companyCnpj ? `CNPJ: ${data.companyCnpj} • Tel: ${data.companyPhone || '-'}` : 'Vistoria Profissional e Laudo Técnico';
+  const subHeader = data.companyCnpj ? `CNPJ: ${data.companyCnpj} • Tel: ${data.companyPhone || '-'}` : 'Serviços de Inspeção e Avaliação Imobiliária';
   doc.text(subHeader, headerTextX, 18);
 
   // Type badge top-right

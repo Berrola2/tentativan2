@@ -6,7 +6,6 @@ import {
   Edit3, 
   Image as ImageIcon, 
   AlertTriangle, 
-  Building, 
   Gauge 
 } from 'lucide-react';
 import type { InspectionData, InspectionType } from '../types/inspection';
@@ -50,17 +49,11 @@ export const PropertyHeaderCard: React.FC<PropertyHeaderCardProps> = ({ data, on
         
         {/* Left Side: Property Info */}
         <div className="flex items-start gap-3.5">
-          {data.companyLogo ? (
-            <img 
-              src={data.companyLogo} 
-              alt="Logo" 
-              className="w-14 h-14 rounded-xl object-contain bg-slate-50 p-1 border border-slate-200 shrink-0" 
-            />
-          ) : (
-            <div className="w-12 h-12 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600 shrink-0">
-              <Building className="w-6 h-6" />
-            </div>
-          )}
+          <img 
+            src={data.companyLogo || '/logo.jpg'} 
+            alt="Logo da Empresa" 
+            className="w-14 h-14 rounded-xl object-contain bg-white p-1 border border-slate-200 shrink-0 shadow-sm" 
+          />
 
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">

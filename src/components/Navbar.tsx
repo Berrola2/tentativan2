@@ -4,7 +4,6 @@ import {
   Sparkles, 
   Building, 
   DownloadCloud, 
-  FileCheck2, 
   LayoutDashboard,
   Mic
 } from 'lucide-react';
@@ -53,15 +52,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => onNavigate('lobby')}
               className="flex items-center gap-2.5 cursor-pointer group"
             >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-700 via-brand-600 to-sky-500 p-0.5 shadow-md shadow-brand-600/20 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center">
-                  <FileCheck2 className="w-5 h-5 text-brand-600" />
-                </div>
-              </div>
+              <img 
+                src="/logo.jpg" 
+                alt="Vistoria YZZY" 
+                className="h-10 w-auto max-w-[130px] sm:max-w-[160px] object-contain rounded-xl shadow-sm border border-slate-200/60 bg-white p-0.5 group-hover:scale-105 transition-transform" 
+              />
               <div>
                 <div className="flex items-center gap-1.5">
-                  <span className="font-extrabold text-base tracking-tight text-slate-900 font-display">
-                    Vistoria<span className="text-brand-600">Pro</span>
+                  <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 font-display">
+                    Vistoria <span className="text-brand-600">YZZY</span>
                   </span>
                   {currentView !== 'lobby' && (
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${typeBadges[inspectionType]}`}>
@@ -69,9 +68,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </span>
                   )}
                 </div>
-                <span className="text-[11px] text-slate-500 font-medium line-clamp-1">
+                <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium line-clamp-1">
                   {currentView === 'lobby' 
-                    ? 'Painel Geral de Vistorias' 
+                    ? 'Serviços de Inspeção e Avaliação' 
                     : `${inspectionTitle || 'Editando Laudo'}${totalPhotos > 0 ? ` • ${totalPhotos} fotos` : ''}`}
                 </span>
               </div>
