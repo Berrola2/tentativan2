@@ -10,7 +10,8 @@ import type {
   Room, 
   InspectionItem, 
   QuickTemplate,
-  SupabaseConfig 
+  SupabaseConfig,
+  InspectionType
 } from './types/inspection';
 import { INSPECTION_TEMPLATES } from './data/templates';
 import { 
@@ -33,6 +34,7 @@ import { PhotoViewerModal } from './components/PhotoViewerModal';
 import { SignatureModal } from './components/SignatureModal';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { BackupSyncModal } from './components/BackupSyncModal';
+import { InspectionsHistoryModal } from './components/InspectionsHistoryModal';
 
 const createDefaultInspection = (): InspectionData => {
   const defaultTemplate = INSPECTION_TEMPLATES[0]; // Apartamento Padrão
@@ -98,6 +100,7 @@ function MainApp() {
   const [isSignaturesOpen, setIsSignaturesOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isBackupSyncOpen, setIsBackupSyncOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [selectedItemForEdit, setSelectedItemForEdit] = useState<InspectionItem | null>(null);
 
@@ -303,6 +306,26 @@ function MainApp() {
     }
   };
 
+  const handleDuplicateAsType = (source: InspectionData, newType: InspectionType) => {
+    const duplicated: InspectionData = {
+      ...source,
+      id: `insp-${Date.now()}`,
+      title: `${source.title || 'Vistoria'} (${newType})`,
+      inspectionType: newType,
+      date: new Date().toISOString().split('T')[0],
+      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      inspectorSignature: undefined,
+      tenantSignature: undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setInspection(duplicated);
+    if (duplicated.rooms.length > 0) {
+      setActiveRoomId(duplicated.rooms[0].id);
+    }
+    showToast(`Vistoria duplicada como "${newType}" com sucesso!`, 'success');
+  };
+
   const handleSaveSignatures = (signatures: {
     inspectorSignature?: string;
     tenantSignature?: string;
@@ -328,6 +351,7 @@ function MainApp() {
       <Navbar
         inspectionType={inspection.inspectionType}
         onNewInspection={handleNewInspection}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenPropertyInfo={() => setIsPropertyInfoOpen(true)}
         onOpenSignatures={() => setIsSignaturesOpen(true)}
@@ -478,6 +502,22 @@ function MainApp() {
           setSupabaseConfig(cfg);
           saveAppProfile({ supabaseConfig: cfg });
         }}
+      />
+
+      {/* Inspections History Modal */}
+      <InspectionsHistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        currentInspectionId={inspection.id}
+        onSelectInspection={(selected) => {
+          setInspection(selected);
+          if (selected.rooms.length > 0) {
+            setActiveRoomId(selected.rooms[0].id);
+          }
+          showToast(`Vistoria "${selected.title}" aberta!`, 'info');
+        }}
+        onNewInspection={handleNewInspection}
+        onDuplicateAsType={handleDuplicateAsType}
       />
 
     </div>

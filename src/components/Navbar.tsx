@@ -6,13 +6,15 @@ import {
   PenTool, 
   DownloadCloud, 
   FileCheck2, 
-  PlusCircle
+  PlusCircle,
+  FolderOpen
 } from 'lucide-react';
 import type { InspectionType } from '../types/inspection';
 
 interface NavbarProps {
   inspectionType: InspectionType;
   onNewInspection: () => void;
+  onOpenHistory: () => void;
   onOpenTemplates: () => void;
   onOpenPropertyInfo: () => void;
   onOpenSignatures: () => void;
@@ -25,6 +27,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   inspectionType,
   onNewInspection,
+  onOpenHistory,
   onOpenTemplates,
   onOpenPropertyInfo,
   onOpenSignatures,
@@ -71,6 +74,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Quick Action Navigation Buttons */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             
+            {/* History / List Button */}
+            <button
+              onClick={onOpenHistory}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all"
+              title="Minhas Vistorias"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-brand-400" />
+              <span className="hidden sm:inline">Vistorias</span>
+            </button>
+
             {/* Template Selector Button */}
             <button
               onClick={onOpenTemplates}

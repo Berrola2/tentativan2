@@ -4,24 +4,45 @@ import type { InspectionData, SupabaseConfig } from '../types/inspection';
 let supabaseInstance: SupabaseClient | null = null;
 let currentConfig: SupabaseConfig | null = null;
 
+// Read default env variables from Vercel / .env if present
+const defaultEnvUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const defaultEnvAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+export function getInitialSupabaseConfig(): SupabaseConfig {
+  return {
+    url: defaultEnvUrl,
+    anonKey: defaultEnvAnonKey,
+    bucketName: 'inspection-photos',
+    tableName: 'inspections',
+    autoSync: !!(defaultEnvUrl && defaultEnvAnonKey),
+  };
+}
+
 export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient | null {
-  if (!config) {
-    return supabaseInstance;
+  const targetUrl = config?.url || defaultEnvUrl;
+  const targetKey = config?.anonKey || defaultEnvAnonKey;
+
+  if (!targetUrl || !targetKey) {
+    return null;
   }
 
   if (
     !supabaseInstance ||
-    currentConfig?.url !== config.url ||
-    currentConfig?.anonKey !== config.anonKey
+    currentConfig?.url !== targetUrl ||
+    currentConfig?.anonKey !== targetKey
   ) {
-    if (config.url && config.anonKey) {
-      try {
-        supabaseInstance = createClient(config.url, config.anonKey);
-        currentConfig = config;
-      } catch (err) {
-        console.error('Failed to initialize Supabase client:', err);
-        return null;
-      }
+    try {
+      supabaseInstance = createClient(targetUrl, targetKey);
+      currentConfig = {
+        url: targetUrl,
+        anonKey: targetKey,
+        bucketName: config?.bucketName || 'inspection-photos',
+        tableName: config?.tableName || 'inspections',
+        autoSync: config?.autoSync || false,
+      };
+    } catch (err) {
+      console.error('Failed to initialize Supabase client:', err);
+      return null;
     }
   }
 
@@ -31,7 +52,7 @@ export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient | nul
 export async function testSupabaseConnection(config: SupabaseConfig): Promise<{ success: boolean; message: string }> {
   try {
     const client = createClient(config.url, config.anonKey);
-    const { error } = await client.from(config.tableName || 'inspections').select('count', { count: 'exact', head: true });
+    const { error } = await client.from(config.tableName || 'inspections').select('id', { count: 'exact', head: true });
     
     if (error && error.code !== 'PGRST116') {
       return { success: false, message: `Erro ao conectar: ${error.message}` };
@@ -45,15 +66,15 @@ export async function testSupabaseConnection(config: SupabaseConfig): Promise<{ 
 
 export async function uploadInspectionToSupabase(
   inspection: InspectionData,
-  config: SupabaseConfig
+  config?: SupabaseConfig
 ): Promise<{ success: boolean; message: string }> {
   const client = getSupabaseClient(config);
   if (!client) {
-    return { success: false, message: 'Supabase não configurado.' };
+    return { success: false, message: 'Supabase não configurado. Informe URL e Chave.' };
   }
 
   try {
-    const tableName = config.tableName || 'inspections';
+    const tableName = config?.tableName || 'inspections';
     const { error } = await client.from(tableName).upsert({
       id: inspection.id,
       title: inspection.title,
@@ -73,5 +94,31 @@ export async function uploadInspectionToSupabase(
     return { success: true, message: 'Vistoria sincronizada com a nuvem no Supabase com sucesso!' };
   } catch (err: any) {
     return { success: false, message: `Erro inesperado: ${err.message}` };
+  }
+}
+
+export async function fetchInspectionsFromSupabase(
+  config?: SupabaseConfig
+): Promise<{ success: boolean; data?: InspectionData[]; message: string }> {
+  const client = getSupabaseClient(config);
+  if (!client) {
+    return { success: false, message: 'Supabase não configurado.' };
+  }
+
+  try {
+    const tableName = config?.tableName || 'inspections';
+    const { data, error } = await client
+      .from(tableName)
+      .select('data_json')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      return { success: false, message: `Erro ao buscar vistorias: ${error.message}` };
+    }
+
+    const inspections: InspectionData[] = (data || []).map((row: any) => row.data_json);
+    return { success: true, data: inspections, message: `${inspections.length} vistorias carregadas da nuvem!` };
+  } catch (err: any) {
+    return { success: false, message: `Erro: ${err.message}` };
   }
 }
