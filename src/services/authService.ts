@@ -232,7 +232,7 @@ export async function fetchCompanyUsers(companyId: string): Promise<AuthUser[]> 
   try {
     const { data, error } = await client
       .from('users')
-      .select('id, company_id, username, full_name, role, cpf, creci, is_active')
+      .select('*')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false });
 
@@ -245,8 +245,8 @@ export async function fetchCompanyUsers(companyId: string): Promise<AuthUser[]> 
       id: u.id,
       companyId: u.company_id,
       username: u.username,
-      fullName: u.full_name,
-      role: u.role,
+      fullName: u.full_name || u.username,
+      role: u.role || 'ROLE_INSPECTOR',
       cpf: u.cpf,
       creci: u.creci,
     }));
@@ -285,20 +285,32 @@ export async function createCompanyUser(
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(user.password.trim(), salt);
 
-    const { data, error } = await client
+    const payload: any = {
+      company_id: companyId,
+      username: cleanUsername,
+      full_name: user.fullName.trim(),
+      role: user.role || 'ROLE_INSPECTOR',
+      password_hash: passwordHash,
+      is_active: true,
+    };
+
+    if (user.cpf?.trim()) payload.cpf = user.cpf.trim();
+    if (user.creci?.trim()) payload.creci = user.creci.trim();
+
+    let { data, error } = await client
       .from('users')
-      .insert({
-        company_id: companyId,
-        username: cleanUsername,
-        full_name: user.fullName.trim(),
-        role: user.role || 'ROLE_INSPECTOR',
-        password_hash: passwordHash,
-        cpf: user.cpf?.trim() || null,
-        creci: user.creci?.trim() || null,
-        is_active: true,
-      })
+      .insert(payload)
       .select()
       .single();
+
+    // If database table doesn't have cpf or creci columns yet, fallback seamlessly
+    if (error && (error.message.includes('cpf') || error.message.includes('creci') || error.code === 'PGRST204')) {
+      delete payload.cpf;
+      delete payload.creci;
+      const retry = await client.from('users').insert(payload).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       if (error.code === '23505') {
