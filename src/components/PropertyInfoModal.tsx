@@ -59,6 +59,39 @@ export const PropertyInfoModal: React.FC<PropertyInfoModalProps> = ({
     generalObservations: data.generalObservations || '',
   });
 
+  // Keep form data synchronized with incoming inspection data whenever opened or updated
+  React.useEffect(() => {
+    if (isOpen && data) {
+      setFormData({
+        title: data.title || '',
+        inspectionType: data.inspectionType || 'Entrada',
+        date: data.date || new Date().toISOString().split('T')[0],
+        time: data.time || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        inspectorName: data.inspectorName || '',
+        inspectorCpfCreci: data.inspectorCpfCreci || '',
+        tenantName: data.tenantName || '',
+        tenantCpf: data.tenantCpf || '',
+        ownerName: data.ownerName || '',
+        propertyAddress: data.propertyAddress || '',
+        propertyNumber: data.propertyNumber || '',
+        propertyComplement: data.propertyComplement || '',
+        propertyNeighborhood: data.propertyNeighborhood || '',
+        propertyCity: data.propertyCity || '',
+        propertyState: data.propertyState || '',
+        propertyZip: data.propertyZip || '',
+        companyName: data.companyName || '',
+        companyCnpj: data.companyCnpj || '',
+        companyPhone: data.companyPhone || '',
+        companyLogo: data.companyLogo,
+        waterMeter: data.waterMeter || '',
+        energyMeter: data.energyMeter || '',
+        gasMeter: data.gasMeter || '',
+        keysInfo: data.keysInfo || '',
+        generalObservations: data.generalObservations || '',
+      });
+    }
+  }, [isOpen, data]);
+
   if (!isOpen) return null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
