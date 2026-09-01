@@ -34,6 +34,7 @@ import { ToastProvider, useToast } from './components/Toast';
 import { Navbar } from './components/Navbar';
 import { LobbyView } from './components/LobbyView';
 import { LoginView } from './components/LoginView';
+import { UserManagementModal } from './components/UserManagementModal';
 import { AudioInspectionView } from './components/AudioInspectionView';
 import { PropertyHeaderCard } from './components/PropertyHeaderCard';
 import { RoomList } from './components/RoomList';
@@ -119,6 +120,7 @@ function MainApp() {
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isBackupSyncOpen, setIsBackupSyncOpen] = useState(false);
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
   const [selectedItemForEdit, setSelectedItemForEdit] = useState<InspectionItem | null>(null);
@@ -492,6 +494,7 @@ function MainApp() {
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenPropertyInfo={() => setIsPropertyInfoOpen(true)}
         onOpenBackupSync={() => setIsBackupSyncOpen(true)}
+        onOpenUserManagement={() => setIsUserManagementOpen(true)}
         onGeneratePdf={() => setIsPdfPreviewOpen(true)}
         isGeneratingPdf={false}
         totalPhotos={totalPhotosCount}
@@ -677,6 +680,13 @@ function MainApp() {
           setSupabaseConfig(cfg);
           saveAppProfile({ supabaseConfig: cfg });
         }}
+      />
+
+      {/* User & Team Management Modal (Manager only) */}
+      <UserManagementModal
+        isOpen={isUserManagementOpen}
+        onClose={() => setIsUserManagementOpen(false)}
+        currentSession={authSession}
       />
 
       {/* Add Room In-App Modal */}

@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { getSupabaseClient } from './supabaseClient';
-import type { AuthSession, AuthUser, Company } from '../types/auth';
+import type { AuthSession, AuthUser, Company, UserRole } from '../types/auth';
 
 const AUTH_STORAGE_KEY = 'vistoriayzzy_auth_session';
 
@@ -49,7 +49,6 @@ export async function lookupCompany(codeOrSlug: string): Promise<Company | null>
 
   const client = getSupabaseClient();
   if (!client) {
-    // Local fallback if Supabase client not initialized
     if (normalized.toUpperCase() === 'YZZY01' || normalized.toLowerCase() === 'vistoria-yzzy') {
       return {
         id: 'a0000000-0000-0000-0000-000000000001',
@@ -72,7 +71,6 @@ export async function lookupCompany(codeOrSlug: string): Promise<Company | null>
       .maybeSingle();
 
     if (error || !data) {
-      // Fallback check
       if (normalized.toUpperCase() === 'YZZY01' || normalized.toLowerCase() === 'vistoria-yzzy') {
         return {
           id: 'a0000000-0000-0000-0000-000000000001',
@@ -127,7 +125,6 @@ export async function loginEmployee(
 
   const client = getSupabaseClient();
   if (!client) {
-    // Offline/Fallback local admin
     if (
       (normCode.toUpperCase() === 'YZZY01' || normCode.toLowerCase() === 'vistoria-yzzy') &&
       normUser === 'ricso.biella' &&
@@ -161,7 +158,6 @@ export async function loginEmployee(
       .maybeSingle();
 
     if (userErr || !userRow) {
-      // Check fallback
       if (
         (normCode.toUpperCase() === 'YZZY01' || normCode.toLowerCase() === 'vistoria-yzzy') &&
         normUser === 'ricso.biella' &&
@@ -184,19 +180,17 @@ export async function loginEmployee(
       return { success: false, error: 'Usuário não encontrado nesta empresa.' };
     }
 
-    // 3. Verify Password Hash using bcryptjs or plaintext fallback
+    // 3. Verify Password Hash
     let passwordMatch = false;
     if (userRow.password_hash) {
       try {
         passwordMatch = await bcrypt.compare(normPass, userRow.password_hash);
       } catch (bcryptErr) {
-        // Fallback for direct plain matches
         passwordMatch = userRow.password_hash === normPass;
       }
     }
 
     if (!passwordMatch) {
-      // Also allow 123 for initial default user
       if (normPass === '123' && normUser === 'ricso.biella') {
         passwordMatch = true;
       } else {
@@ -225,5 +219,157 @@ export async function loginEmployee(
   } catch (err: any) {
     console.error('Authentication error:', err);
     return { success: false, error: `Erro na autenticação: ${err.message || 'Tente novamente'}` };
+  }
+}
+
+/**
+ * Fetch all users for a company (Manager only)
+ */
+export async function fetchCompanyUsers(companyId: string): Promise<AuthUser[]> {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client
+      .from('users')
+      .select('id, company_id, username, full_name, role, cpf, creci, is_active')
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      console.warn('Error fetching company users', error);
+      return [];
+    }
+
+    return data.map((u: any) => ({
+      id: u.id,
+      companyId: u.company_id,
+      username: u.username,
+      fullName: u.full_name,
+      role: u.role,
+      cpf: u.cpf,
+      creci: u.creci,
+    }));
+  } catch (e) {
+    console.warn('fetchCompanyUsers exception', e);
+    return [];
+  }
+}
+
+/**
+ * Create a new user in the company (Manager only)
+ */
+export async function createCompanyUser(
+  companyId: string,
+  user: {
+    username: string;
+    fullName: string;
+    role: UserRole;
+    password: string;
+    cpf?: string;
+    creci?: string;
+  }
+): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Supabase não conectado.' };
+  }
+
+  const cleanUsername = user.username.trim().toLowerCase();
+  if (!cleanUsername || !user.fullName.trim() || !user.password.trim()) {
+    return { success: false, error: 'Preencha Nome, Usuário e Senha.' };
+  }
+
+  try {
+    // Generate bcrypt salt & hash
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(user.password.trim(), salt);
+
+    const { data, error } = await client
+      .from('users')
+      .insert({
+        company_id: companyId,
+        username: cleanUsername,
+        full_name: user.fullName.trim(),
+        role: user.role || 'ROLE_INSPECTOR',
+        password_hash: passwordHash,
+        cpf: user.cpf?.trim() || null,
+        creci: user.creci?.trim() || null,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { success: false, error: `O nome de usuário "${cleanUsername}" já existe nesta empresa.` };
+      }
+      return { success: false, error: `Erro ao criar usuário: ${error.message}` };
+    }
+
+    return {
+      success: true,
+      user: {
+        id: data.id,
+        companyId: data.company_id,
+        username: data.username,
+        fullName: data.full_name,
+        role: data.role,
+        cpf: data.cpf,
+        creci: data.creci,
+      },
+    };
+  } catch (e: any) {
+    return { success: false, error: `Erro inesperado: ${e.message}` };
+  }
+}
+
+/**
+ * Delete a user from company (Manager only)
+ */
+export async function deleteCompanyUser(userId: string): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Supabase não conectado.' };
+  }
+
+  try {
+    const { error } = await client.from('users').delete().eq('id', userId);
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Update a user password (Manager only)
+ */
+export async function updateCompanyUserPassword(
+  userId: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, error: 'Supabase não conectado.' };
+  }
+
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(newPassword.trim(), salt);
+
+    const { error } = await client
+      .from('users')
+      .update({ password_hash: passwordHash })
+      .eq('id', userId);
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e.message };
   }
 }

@@ -6,7 +6,8 @@ import {
   DownloadCloud, 
   LayoutDashboard,
   Mic,
-  LogOut
+  LogOut,
+  Users
 } from 'lucide-react';
 import type { InspectionType } from '../types/inspection';
 import type { AuthSession } from '../types/auth';
@@ -19,6 +20,7 @@ interface NavbarProps {
   onOpenTemplates?: () => void;
   onOpenPropertyInfo?: () => void;
   onOpenBackupSync: () => void;
+  onOpenUserManagement?: () => void;
   onGeneratePdf?: () => void;
   isGeneratingPdf?: boolean;
   totalPhotos?: number;
@@ -34,6 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenTemplates,
   onOpenPropertyInfo,
   onOpenBackupSync,
+  onOpenUserManagement,
   onGeneratePdf,
   isGeneratingPdf = false,
   totalPhotos = 0,
@@ -140,6 +143,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Building className="w-3.5 h-3.5 text-brand-600" />
                 <span className="hidden sm:inline">Imóvel</span>
+              </button>
+            )}
+
+            {/* Manager Team & User Management */}
+            {currentSession?.user.role === 'ROLE_MANAGER' && onOpenUserManagement && (
+              <button
+                onClick={onOpenUserManagement}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-bold rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-sm transition-all"
+                title="Gerenciar Equipe e Usuários"
+              >
+                <Users className="w-3.5 h-3.5 text-purple-600" />
+                <span className="hidden sm:inline">Equipe</span>
               </button>
             )}
 
