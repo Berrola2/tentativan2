@@ -1,0 +1,17 @@
+{
+  "short_name": "VistoriaPro",
+  "name": "VistoriaPro - Laudos Imobiliários",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#0284c7",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/"
+}
