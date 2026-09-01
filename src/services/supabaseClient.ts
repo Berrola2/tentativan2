@@ -4,9 +4,9 @@ import type { InspectionData, SupabaseConfig } from '../types/inspection';
 let supabaseInstance: SupabaseClient | null = null;
 let currentConfig: SupabaseConfig | null = null;
 
-// Read default env variables from Vercel / .env if present
-const defaultEnvUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const defaultEnvAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Read default env variables or use configured Supabase project
+const defaultEnvUrl = import.meta.env.VITE_SUPABASE_URL || 'https://dgeczjzbohmveonqxxzv.supabase.co';
+const defaultEnvAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_3S17TTx7Eh_2qSfPzzLw9w_l5ImSPKl';
 
 export function getInitialSupabaseConfig(): SupabaseConfig {
   return {

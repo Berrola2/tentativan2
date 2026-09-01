@@ -11,7 +11,7 @@ import {
   Server
 } from 'lucide-react';
 import type { InspectionData, SupabaseConfig } from '../types/inspection';
-import { testSupabaseConnection, uploadInspectionToSupabase } from '../services/supabaseClient';
+import { testSupabaseConnection, uploadInspectionToSupabase, getInitialSupabaseConfig } from '../services/supabaseClient';
 import { useToast } from './Toast';
 
 interface BackupSyncModalProps {
@@ -34,12 +34,13 @@ export const BackupSyncModal: React.FC<BackupSyncModalProps> = ({
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const initialCfg = getInitialSupabaseConfig();
   const [config, setConfig] = useState<SupabaseConfig>({
-    url: supabaseConfig?.url || '',
-    anonKey: supabaseConfig?.anonKey || '',
-    bucketName: supabaseConfig?.bucketName || 'inspection-photos',
-    tableName: supabaseConfig?.tableName || 'inspections',
-    autoSync: supabaseConfig?.autoSync || false,
+    url: supabaseConfig?.url || initialCfg.url,
+    anonKey: supabaseConfig?.anonKey || initialCfg.anonKey,
+    bucketName: supabaseConfig?.bucketName || initialCfg.bucketName,
+    tableName: supabaseConfig?.tableName || initialCfg.tableName,
+    autoSync: supabaseConfig?.autoSync ?? initialCfg.autoSync,
   });
 
   const [isTesting, setIsTesting] = useState(false);
