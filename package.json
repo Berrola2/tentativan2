@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
     "autoprefixer": "^10.4.20",
+    "bcryptjs": "^3.0.3",
     "canvas-confetti": "^1.9.4",
     "dexie": "^4.4.5",
     "dexie-react-hooks": "^4.4.0",
@@ -24,6 +25,7 @@
     "tailwindcss": "^3.4.17"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",

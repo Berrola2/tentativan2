@@ -66,7 +66,8 @@ export async function testSupabaseConnection(config: SupabaseConfig): Promise<{ 
 
 export async function uploadInspectionToSupabase(
   inspection: InspectionData,
-  config?: SupabaseConfig
+  config?: SupabaseConfig,
+  companyId?: string
 ): Promise<{ success: boolean; message: string }> {
   const client = getSupabaseClient(config);
   if (!client) {
@@ -75,7 +76,7 @@ export async function uploadInspectionToSupabase(
 
   try {
     const tableName = config?.tableName || 'inspections';
-    const { error } = await client.from(tableName).upsert({
+    const payload: any = {
       id: inspection.id,
       title: inspection.title || 'Vistoria Sem Título',
       inspection_type: inspection.inspectionType || 'Entrada',
@@ -85,7 +86,13 @@ export async function uploadInspectionToSupabase(
       property_address: `${inspection.propertyAddress || ''}, ${inspection.propertyNumber || ''}`,
       data_json: inspection,
       updated_at: new Date().toISOString(),
-    });
+    };
+
+    if (companyId) {
+      payload.company_id = companyId;
+    }
+
+    const { error } = await client.from(tableName).upsert(payload);
 
     if (error) {
       return { success: false, message: `Erro ao salvar no Supabase: ${error.message}` };
@@ -98,7 +105,8 @@ export async function uploadInspectionToSupabase(
 }
 
 export async function fetchInspectionsFromSupabase(
-  config?: SupabaseConfig
+  config?: SupabaseConfig,
+  companyId?: string
 ): Promise<{ success: boolean; data?: InspectionData[]; message: string }> {
   const client = getSupabaseClient(config);
   if (!client) {
@@ -107,10 +115,16 @@ export async function fetchInspectionsFromSupabase(
 
   try {
     const tableName = config?.tableName || 'inspections';
-    const { data, error } = await client
+    let query = client
       .from(tableName)
-      .select('data_json')
+      .select('data_json, company_id')
       .order('updated_at', { ascending: false });
+
+    if (companyId) {
+      query = query.eq('company_id', companyId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       return { success: false, message: `Erro ao buscar da nuvem: ${error.message}` };

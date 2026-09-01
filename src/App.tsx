@@ -26,11 +26,14 @@ import {
   fetchInspectionsFromSupabase, 
   deleteInspectionFromSupabase 
 } from './services/supabaseClient';
+import { getCurrentSession, clearSession } from './services/authService';
+import type { AuthSession } from './types/auth';
 
 // Components
 import { ToastProvider, useToast } from './components/Toast';
 import { Navbar } from './components/Navbar';
 import { LobbyView } from './components/LobbyView';
+import { LoginView } from './components/LoginView';
 import { AudioInspectionView } from './components/AudioInspectionView';
 import { PropertyHeaderCard } from './components/PropertyHeaderCard';
 import { RoomList } from './components/RoomList';
@@ -100,6 +103,9 @@ const createEmptyInspection = (): InspectionData => {
 function MainApp() {
   const { showToast } = useToast();
 
+  // Multi-tenant auth session
+  const [authSession, setAuthSession] = useState<AuthSession | null>(getCurrentSession);
+
   // Navigation: 'lobby' | 'inspection' | 'audio-inspection'
   const [currentView, setCurrentView] = useState<'lobby' | 'inspection' | 'audio-inspection'>('lobby');
 
@@ -141,7 +147,7 @@ function MainApp() {
   const handleSyncCloud = async (silent = false) => {
     setIsSyncingCloud(true);
     try {
-      const res = await fetchInspectionsFromSupabase(supabaseConfig);
+      const res = await fetchInspectionsFromSupabase(supabaseConfig, authSession?.company.id);
       if (res.success && res.data && res.data.length > 0) {
         // Save all remote inspections into local Dexie IndexedDB
         for (const remoteInsp of res.data) {
@@ -188,8 +194,8 @@ function MainApp() {
           }
         }
 
-        // Auto-fetch from Supabase on startup
-        fetchInspectionsFromSupabase(activeCfg).then(async (res) => {
+        // Auto-fetch from Supabase on startup with company isolation
+        fetchInspectionsFromSupabase(activeCfg, authSession?.company.id).then(async (res) => {
           if (res.success && res.data && res.data.length > 0) {
             for (const remoteInsp of res.data) {
               await saveInspectionToDb(remoteInsp);
@@ -203,7 +209,7 @@ function MainApp() {
     }
 
     loadData();
-  }, []);
+  }, [authSession]);
 
   // Sync active room when current inspection changes
   useEffect(() => {
@@ -224,8 +230,8 @@ function MainApp() {
         try {
           await saveInspectionToDb(currentInspection);
           await reloadInspections();
-          // Push to cloud in background
-          uploadInspectionToSupabase(currentInspection, supabaseConfig).catch(() => {});
+          // Push to cloud in background with company isolation
+          uploadInspectionToSupabase(currentInspection, supabaseConfig, authSession?.company.id).catch(() => {});
         } catch (e) {
           console.warn('Autosave error', e);
         }
@@ -233,7 +239,7 @@ function MainApp() {
 
       return () => clearTimeout(timer);
     }
-  }, [currentInspection, supabaseConfig]);
+  }, [currentInspection, supabaseConfig, authSession]);
 
   // Handlers
   const handleSelectInspectionFromLobby = (selected: InspectionData) => {
@@ -248,7 +254,12 @@ function MainApp() {
     const profile = await getAppProfile();
     const fresh = createEmptyInspection();
 
-    if (profile) {
+    if (authSession) {
+      fresh.companyName = authSession.company.tradeName;
+      fresh.companyLogo = authSession.company.logoUrl;
+      fresh.inspectorName = authSession.user.fullName;
+      fresh.inspectorCpfCreci = authSession.user.creci || authSession.user.cpf || '';
+    } else if (profile) {
       if (profile.companyName) fresh.companyName = profile.companyName;
       if (profile.companyCnpj) fresh.companyCnpj = profile.companyCnpj;
       if (profile.companyPhone) fresh.companyPhone = profile.companyPhone;
@@ -259,7 +270,7 @@ function MainApp() {
 
     await saveInspectionToDb(fresh);
     // Push immediately to Supabase
-    uploadInspectionToSupabase(fresh, supabaseConfig).catch(() => {});
+    uploadInspectionToSupabase(fresh, supabaseConfig, authSession?.company.id).catch(() => {});
     await reloadInspections();
     setCurrentInspection(fresh);
     setActiveRoomId(fresh.rooms[0]?.id || '');
@@ -457,6 +468,18 @@ function MainApp() {
     0
   );
 
+  // If user is not logged in, render the secure LoginView
+  if (!authSession) {
+    return (
+      <LoginView
+        onLoginSuccess={(session) => {
+          setAuthSession(session);
+          showToast(`Bem-vindo, ${session.user.fullName}!`, 'success');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-brand-500 selection:text-white pb-24 md:pb-8">
       
@@ -472,6 +495,12 @@ function MainApp() {
         onGeneratePdf={() => setIsPdfPreviewOpen(true)}
         isGeneratingPdf={false}
         totalPhotos={totalPhotosCount}
+        currentSession={authSession}
+        onLogout={() => {
+          clearSession();
+          setAuthSession(null);
+          showToast('Sessão encerrada com sucesso.', 'info');
+        }}
       />
 
       {/* 2. Main Content Router */}
