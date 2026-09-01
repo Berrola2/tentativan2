@@ -14,7 +14,9 @@ import {
   ShieldCheck, 
   Image as ImageIcon,
   AlertTriangle,
-  FolderOpen
+  FolderOpen,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import type { InspectionData, InspectionType } from '../types/inspection';
 
@@ -27,6 +29,8 @@ interface LobbyViewProps {
   onDuplicateInspection: (source: InspectionData, newType: InspectionType) => void;
   onDeleteInspection: (id: string, title: string) => void;
   onOpenCloudSync: () => void;
+  onSyncCloud: () => Promise<void>;
+  isSyncingCloud: boolean;
 }
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
@@ -38,6 +42,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onDuplicateInspection,
   onDeleteInspection,
   onOpenCloudSync,
+  onSyncCloud,
+  isSyncingCloud,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -166,14 +172,40 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         </div>
 
         <div 
-          onClick={onOpenCloudSync}
-          className="bg-white hover:bg-slate-50 rounded-2xl p-4 border border-slate-200 shadow-sm cursor-pointer transition-colors"
+          onClick={onSyncCloud}
+          className="bg-indigo-50/70 hover:bg-indigo-100/70 border border-indigo-200 rounded-2xl p-4 shadow-sm cursor-pointer transition-all flex flex-col justify-between group"
+          title="Clique para sincronizar e carregar vistorias feitas por outros usuários"
         >
-          <div className="flex items-center gap-2 text-slate-400 mb-1">
-            <DownloadCloud className="w-4 h-4 text-indigo-600" />
-            <span className="text-xs font-semibold">Supabase Cloud</span>
+          <div className="flex items-center justify-between text-indigo-700 mb-1">
+            <div className="flex items-center gap-1.5 font-bold text-xs">
+              <DownloadCloud className="w-4 h-4 text-indigo-600" />
+              <span>Nuvem Supabase</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCloudSync();
+                }}
+                className="p-1 rounded-md text-indigo-500 hover:text-indigo-800 hover:bg-indigo-200/50 transition-colors"
+                title="Configurações de Backup e Nuvem"
+              >
+                <DownloadCloud className="w-3.5 h-3.5" />
+              </button>
+              {isSyncingCloud ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5 text-indigo-500 group-hover:rotate-180 transition-transform duration-500" />
+              )}
+            </div>
           </div>
-          <span className="text-xs font-bold text-indigo-600 block mt-1">Conectado & Sincronizável</span>
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[11px] font-bold text-indigo-900">
+              {isSyncingCloud ? 'Sincronizando...' : 'Toque p/ Atualizar'}
+            </span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          </div>
         </div>
       </div>
 

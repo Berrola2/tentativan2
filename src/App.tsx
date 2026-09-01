@@ -21,6 +21,11 @@ import {
   getAppProfile, 
   saveAppProfile 
 } from './services/db';
+import { 
+  uploadInspectionToSupabase, 
+  fetchInspectionsFromSupabase, 
+  deleteInspectionFromSupabase 
+} from './services/supabaseClient';
 
 // Components
 import { ToastProvider, useToast } from './components/Toast';
@@ -113,6 +118,7 @@ function MainApp() {
   const [selectedItemForEdit, setSelectedItemForEdit] = useState<InspectionItem | null>(null);
   const [inspectionToDelete, setInspectionToDelete] = useState<{ id: string; title: string } | null>(null);
   const [isDeleteActiveRoomOpen, setIsDeleteActiveRoomOpen] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
 
   // Photo viewer state
   const [photoViewer, setPhotoViewer] = useState<{ isOpen: boolean; url: string; caption?: string }>({
@@ -132,13 +138,46 @@ function MainApp() {
     }
   };
 
+  const handleSyncCloud = async (silent = false) => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await fetchInspectionsFromSupabase(supabaseConfig);
+      if (res.success && res.data && res.data.length > 0) {
+        // Save all remote inspections into local Dexie IndexedDB
+        for (const remoteInsp of res.data) {
+          await saveInspectionToDb(remoteInsp);
+        }
+        const updatedList = await reloadInspections();
+        if (updatedList.length > 0) {
+          const currentStillExists = updatedList.some((i) => i.id === currentInspection.id);
+          if (!currentStillExists) {
+            setCurrentInspection(updatedList[0]);
+          }
+        }
+        if (!silent) {
+          showToast(`${res.data.length} vistoria(s) sincronizada(s) da nuvem!`, 'success');
+        }
+      } else if (!silent) {
+        showToast('Nuvem verificada: suas vistorias já estão atualizadas.', 'info');
+      }
+    } catch (err) {
+      if (!silent) {
+        showToast('Não foi possível sincronizar com a nuvem agora.', 'error');
+      }
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
   // Initial load
   useEffect(() => {
     async function loadData() {
       try {
         const profile = await getAppProfile();
+        let activeCfg = supabaseConfig;
         if (profile?.supabaseConfig) {
           setSupabaseConfig(profile.supabaseConfig);
+          activeCfg = profile.supabaseConfig;
         }
 
         const list = await reloadInspections();
@@ -148,6 +187,16 @@ function MainApp() {
             setActiveRoomId(list[0].rooms[0].id);
           }
         }
+
+        // Auto-fetch from Supabase on startup
+        fetchInspectionsFromSupabase(activeCfg).then(async (res) => {
+          if (res.success && res.data && res.data.length > 0) {
+            for (const remoteInsp of res.data) {
+              await saveInspectionToDb(remoteInsp);
+            }
+            await reloadInspections();
+          }
+        }).catch(() => {});
       } catch (err) {
         console.error('Error loading data', err);
       }
@@ -168,18 +217,23 @@ function MainApp() {
     }
   }, [currentInspection, activeRoomId]);
 
-  // Auto-save current inspection to IndexedDB with debounce
+  // Auto-save current inspection to local IndexedDB and Supabase Cloud with debounce
   useEffect(() => {
     if (currentInspection && currentInspection.id) {
-      const timer = setTimeout(() => {
-        saveInspectionToDb(currentInspection)
-          .then(() => reloadInspections())
-          .catch((e) => console.warn('Autosave error', e));
-      }, 400);
+      const timer = setTimeout(async () => {
+        try {
+          await saveInspectionToDb(currentInspection);
+          await reloadInspections();
+          // Push to cloud in background
+          uploadInspectionToSupabase(currentInspection, supabaseConfig).catch(() => {});
+        } catch (e) {
+          console.warn('Autosave error', e);
+        }
+      }, 500);
 
       return () => clearTimeout(timer);
     }
-  }, [currentInspection]);
+  }, [currentInspection, supabaseConfig]);
 
   // Handlers
   const handleSelectInspectionFromLobby = (selected: InspectionData) => {
@@ -204,11 +258,13 @@ function MainApp() {
     }
 
     await saveInspectionToDb(fresh);
+    // Push immediately to Supabase
+    uploadInspectionToSupabase(fresh, supabaseConfig).catch(() => {});
     await reloadInspections();
     setCurrentInspection(fresh);
     setActiveRoomId(fresh.rooms[0]?.id || '');
     setCurrentView('inspection');
-    showToast('Nova vistoria criada com sucesso!', 'success');
+    showToast('Nova vistoria criada e sincronizada!', 'success');
   };
 
   const handleDeleteInspection = (id: string, title: string) => {
@@ -219,6 +275,8 @@ function MainApp() {
     if (!inspectionToDelete) return;
     const { id } = inspectionToDelete;
     await deleteInspectionFromDb(id);
+    // Delete from Supabase in background
+    deleteInspectionFromSupabase(id, supabaseConfig).catch(() => {});
     const remaining = await reloadInspections();
     if (currentInspection.id === id) {
       if (remaining.length > 0) {
@@ -430,6 +488,8 @@ function MainApp() {
             onDuplicateInspection={handleDuplicateInspection}
             onDeleteInspection={handleDeleteInspection}
             onOpenCloudSync={() => setIsBackupSyncOpen(true)}
+            onSyncCloud={handleSyncCloud}
+            isSyncingCloud={isSyncingCloud}
           />
         )}
 

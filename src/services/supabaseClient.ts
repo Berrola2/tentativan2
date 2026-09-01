@@ -14,7 +14,7 @@ export function getInitialSupabaseConfig(): SupabaseConfig {
     anonKey: defaultEnvAnonKey,
     bucketName: 'inspection-photos',
     tableName: 'inspections',
-    autoSync: !!(defaultEnvUrl && defaultEnvAnonKey),
+    autoSync: true,
   };
 }
 
@@ -38,7 +38,7 @@ export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient | nul
         anonKey: targetKey,
         bucketName: config?.bucketName || 'inspection-photos',
         tableName: config?.tableName || 'inspections',
-        autoSync: config?.autoSync || false,
+        autoSync: config?.autoSync ?? true,
       };
     } catch (err) {
       console.error('Failed to initialize Supabase client:', err);
@@ -70,19 +70,19 @@ export async function uploadInspectionToSupabase(
 ): Promise<{ success: boolean; message: string }> {
   const client = getSupabaseClient(config);
   if (!client) {
-    return { success: false, message: 'Supabase não configurado. Informe URL e Chave.' };
+    return { success: false, message: 'Supabase não configurado.' };
   }
 
   try {
     const tableName = config?.tableName || 'inspections';
     const { error } = await client.from(tableName).upsert({
       id: inspection.id,
-      title: inspection.title,
-      inspection_type: inspection.inspectionType,
+      title: inspection.title || 'Vistoria Sem Título',
+      inspection_type: inspection.inspectionType || 'Entrada',
       date: inspection.date,
-      inspector_name: inspection.inspectorName,
-      tenant_name: inspection.tenantName,
-      property_address: `${inspection.propertyAddress}, ${inspection.propertyNumber}`,
+      inspector_name: inspection.inspectorName || '',
+      tenant_name: inspection.tenantName || '',
+      property_address: `${inspection.propertyAddress || ''}, ${inspection.propertyNumber || ''}`,
       data_json: inspection,
       updated_at: new Date().toISOString(),
     });
@@ -91,7 +91,7 @@ export async function uploadInspectionToSupabase(
       return { success: false, message: `Erro ao salvar no Supabase: ${error.message}` };
     }
 
-    return { success: true, message: 'Vistoria sincronizada com a nuvem no Supabase com sucesso!' };
+    return { success: true, message: 'Vistoria salva na nuvem com sucesso!' };
   } catch (err: any) {
     return { success: false, message: `Erro inesperado: ${err.message}` };
   }
@@ -113,11 +113,34 @@ export async function fetchInspectionsFromSupabase(
       .order('updated_at', { ascending: false });
 
     if (error) {
-      return { success: false, message: `Erro ao buscar vistorias: ${error.message}` };
+      return { success: false, message: `Erro ao buscar da nuvem: ${error.message}` };
     }
 
     const inspections: InspectionData[] = (data || []).map((row: any) => row.data_json);
     return { success: true, data: inspections, message: `${inspections.length} vistorias carregadas da nuvem!` };
+  } catch (err: any) {
+    return { success: false, message: `Erro: ${err.message}` };
+  }
+}
+
+export async function deleteInspectionFromSupabase(
+  id: string,
+  config?: SupabaseConfig
+): Promise<{ success: boolean; message: string }> {
+  const client = getSupabaseClient(config);
+  if (!client) {
+    return { success: false, message: 'Supabase não configurado.' };
+  }
+
+  try {
+    const tableName = config?.tableName || 'inspections';
+    const { error } = await client.from(tableName).delete().eq('id', id);
+
+    if (error) {
+      return { success: false, message: `Erro ao excluir na nuvem: ${error.message}` };
+    }
+
+    return { success: true, message: 'Vistoria removida da nuvem com sucesso!' };
   } catch (err: any) {
     return { success: false, message: `Erro: ${err.message}` };
   }
