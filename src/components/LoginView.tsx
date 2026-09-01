@@ -8,7 +8,6 @@ import {
   Loader2, 
   Eye, 
   EyeOff,
-  Sparkles,
   CheckCircle2
 } from 'lucide-react';
 import { lookupCompany, loginEmployee } from '../services/authService';
@@ -19,9 +18,9 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
-  const [corporateCode, setCorporateCode] = useState('YZZY01');
-  const [username, setUsername] = useState('ricso.biella');
-  const [password, setPassword] = useState('123');
+  const [corporateCode, setCorporateCode] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -67,13 +66,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const handleFillDemo = (code: string, user: string, pass: string) => {
-    setCorporateCode(code);
-    setUsername(user);
-    setPassword(pass);
-    setErrorMessage(null);
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-8 sm:py-12 px-4 sm:px-6 lg:px-8 font-sans selection:bg-brand-500 selection:text-white">
       
@@ -96,7 +88,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             {companyBranding?.tradeName || 'Vistoria YZZY'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
-            Sistema Multi-Tenant de Inspeção e Vistoria Imobiliária
+            Sistema de Inspeção e Vistoria Imobiliária
           </p>
         </div>
       </div>
@@ -104,20 +96,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-7 px-6 sm:px-9 rounded-3xl border border-slate-200 shadow-xl space-y-5">
           
-          {/* Quick preset badge */}
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="pb-2 border-b border-slate-100">
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
               Acesso Corporativo
             </span>
-            <button
-              type="button"
-              onClick={() => handleFillDemo('YZZY01', 'ricso.biella', '123')}
-              className="text-[11px] font-bold text-brand-600 hover:text-brand-700 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200 transition-colors flex items-center gap-1"
-              title="Preencher dados de teste"
-            >
-              <Sparkles className="w-3 h-3" />
-              <span>Preencher Padrão</span>
-            </button>
           </div>
 
           {errorMessage && (
