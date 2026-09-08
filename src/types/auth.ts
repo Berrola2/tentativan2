@@ -26,7 +26,6 @@ export interface UserProfile {
   fullName: string;
   role: UserRole;
   active: boolean;
-  authEmail?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -75,7 +74,6 @@ export interface AuthState {
 }
 
 export interface PublicCompanyInfo {
-  id: string;
   name: string;
   slug: string;
   logoUrl?: string;

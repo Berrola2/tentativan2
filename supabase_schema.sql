@@ -1,5 +1,8 @@
 -- ==============================================================================
--- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 3.1 (HARDENING & TABELA PRIVADA DE AUTH)
+-- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 3.3 (IMPLANTAÇÃO NÃO DESTRUTIVA)
+-- ==============================================================================
+-- Este script é 100% IDEMPOTENTE e NÃO DESTRUTIVO:
+-- Preserva todos os dados existentes nas tabelas 'inspections', 'companies' e 'profiles'.
 -- ==============================================================================
 
 -- 1. Extensões Essenciais
@@ -19,7 +22,7 @@ EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;
 
--- 3. Tabela de Empresas (Companies / Multi-Tenant)
+-- 3. Tabela de Empresas (Companies / Multi-Tenant) — Não Destrutiva
 CREATE TABLE IF NOT EXISTS public.companies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -30,12 +33,10 @@ CREATE TABLE IF NOT EXISTS public.companies (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Índices de performance para empresas
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies(slug);
 CREATE INDEX IF NOT EXISTS idx_companies_active ON public.companies(active);
 
--- 4. Tabela de Perfis de Usuário (Profiles) vinculada a auth.users
--- ATENÇÃO DE SEGURANÇA: Não contém auth_email (isolado em tabela privada server-only)
+-- 4. Tabela de Perfis de Usuário (Profiles) vinculada a auth.users — Não Destrutiva
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
@@ -48,20 +49,20 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     CONSTRAINT uq_profiles_company_username UNIQUE (company_id, username)
 );
 
--- Índices de performance para perfis
 CREATE INDEX IF NOT EXISTS idx_profiles_company_id ON public.profiles(company_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_username ON public.profiles(username);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_active ON public.profiles(active);
 
 -- 5. Tabela Privada de Identidades Internas de Autenticação (Server-Only)
--- Inacessível por SELECT de anon e authenticated (sem policies, RLS ativado, REVOKE ALL)
+-- ATENÇÃO DE SEGURANÇA: Inacessível por SELECT de anon e authenticated (sem policies, RLS ativado, REVOKE ALL)
 CREATE TABLE IF NOT EXISTS public.user_auth_identities (
     user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
     username TEXT NOT NULL,
     auth_email TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_user_auth_identities_company_username UNIQUE (company_id, username)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_auth_identities_search ON public.user_auth_identities(company_id, username);
@@ -207,7 +208,32 @@ CREATE TRIGGER tr_protect_profile_sensitive_fields
     FOR EACH ROW
     EXECUTE FUNCTION public.protect_profile_sensitive_fields();
 
--- 10. Função Segura de Rate Limiting para Autenticação (Server-Side)
+-- 10. Trigger de Consistência entre Profiles e user_auth_identities
+CREATE OR REPLACE FUNCTION public.sync_profile_identity_consistency()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM public.user_auth_identities WHERE user_id = NEW.id) THEN
+        UPDATE public.user_auth_identities
+        SET username = NEW.username,
+            company_id = NEW.company_id
+        WHERE user_id = NEW.id
+          AND (username IS DISTINCT FROM NEW.username OR company_id IS DISTINCT FROM NEW.company_id);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_sync_profile_identity_consistency ON public.profiles;
+CREATE TRIGGER tr_sync_profile_identity_consistency
+    AFTER UPDATE ON public.profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION public.sync_profile_identity_consistency();
+
+-- 11. Função Segura de Rate Limiting para Autenticação (Server-Side)
 CREATE OR REPLACE FUNCTION public.check_and_record_login_attempt(
     p_identifier TEXT,
     p_max_attempts INT DEFAULT 5,
@@ -286,7 +312,7 @@ BEGIN
 END;
 $$;
 
--- 11. Função Interna Segura para Resolver Identidade Interna (Apenas Service Role / Edge Functions)
+-- 12. Função Interna Segura para Resolver Identidade Interna (Apenas Service Role / Edge Functions)
 CREATE OR REPLACE FUNCTION public.resolve_user_auth_email(
     p_company_slug TEXT,
     p_username TEXT
@@ -323,10 +349,9 @@ AS $$
     LIMIT 1;
 $$;
 
--- 12. RPC Segura para Consulta Pública de Empresa por Slug no Login
+-- 13. RPC Segura para Consulta Pública de Empresa por Slug no Login (Retorna apenas campos públicos)
 CREATE OR REPLACE FUNCTION public.get_company_login_info(p_slug TEXT)
 RETURNS TABLE (
-    id UUID,
     name TEXT,
     slug TEXT,
     logo_url TEXT,
@@ -338,7 +363,6 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
     SELECT 
-        c.id,
         c.name,
         c.slug,
         c.logo_url,
@@ -349,7 +373,7 @@ AS $$
     LIMIT 1;
 $$;
 
--- 13. Permissões Granulares (GRANT / REVOKE)
+-- 14. Permissões Granulares (GRANT / REVOKE)
 REVOKE ALL ON FUNCTION public.get_auth_company_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_auth_company_id() TO authenticated;
 
@@ -372,7 +396,7 @@ GRANT EXECUTE ON FUNCTION public.reset_login_rate_limit(TEXT) TO service_role;
 REVOKE ALL ON FUNCTION public.get_company_login_info(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_company_login_info(TEXT) TO anon, authenticated;
 
--- 14. Políticas RLS: public.companies
+-- 15. Políticas RLS: public.companies
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Permitir consulta publica de empresas ativas por slug" ON public.companies;
@@ -394,7 +418,7 @@ CREATE POLICY "Gerentes podem atualizar os dados de sua propria empresa"
     USING (id = public.get_auth_company_id() AND public.is_auth_manager())
     WITH CHECK (id = public.get_auth_company_id() AND public.is_auth_manager());
 
--- 15. Políticas RLS: public.profiles
+-- 16. Políticas RLS: public.profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Perfis visiveis somente por membros da mesma empresa" ON public.profiles;
@@ -432,7 +456,7 @@ CREATE POLICY "Gerentes podem excluir membros de sua empresa"
     TO authenticated
     USING (company_id = public.get_auth_company_id() AND public.is_auth_manager() AND id <> auth.uid());
 
--- 16. Preservação Intacta da Tabela de Vistorias (Inspections)
+-- 17. Preservação Intacta da Tabela de Vistorias (Inspections) — NÃO ALTERAR
 CREATE TABLE IF NOT EXISTS public.inspections (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -462,7 +486,7 @@ CREATE TRIGGER tr_inspections_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_updated_at();
 
--- 17. Storage Bucket para Fotos
+-- 18. Storage Bucket para Fotos
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('inspection-photos', 'inspection-photos', true)
 ON CONFLICT (id) DO NOTHING;

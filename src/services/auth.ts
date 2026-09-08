@@ -150,7 +150,6 @@ export async function lookupPublicCompany(slug: string): Promise<PublicCompanyIn
 
     const item = data[0];
     return {
-      id: item.id,
       name: item.name,
       slug: item.slug,
       logoUrl: item.logo_url,
