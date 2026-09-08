@@ -1,5 +1,5 @@
 -- ==============================================================================
--- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 2 (AUTENTICAÇÃO & MULTI-TENANT)
+-- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 2.1 (HARDENING DE SEGURANÇA)
 -- ==============================================================================
 
 -- 1. Extensões Essenciais
@@ -55,12 +55,16 @@ CREATE INDEX IF NOT EXISTS idx_profiles_active ON public.profiles(active);
 
 -- 5. Função Utilitária para Atualização de Timestamp (updated_at)
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER 
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Triggers de timestamp
 DROP TRIGGER IF EXISTS tr_companies_updated_at ON public.companies;
@@ -75,13 +79,13 @@ CREATE TRIGGER tr_profiles_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_updated_at();
 
--- 6. Funções Auxiliares Seguras para RLS (Sem recursão e com SECURITY DEFINER)
+-- 6. Funções Auxiliares Seguras para RLS (Sem recursão e com search_path seguro)
 CREATE OR REPLACE FUNCTION public.get_auth_company_id()
 RETURNS UUID
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
     SELECT company_id 
     FROM public.profiles 
@@ -94,7 +98,7 @@ RETURNS public.app_role
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
     SELECT role 
     FROM public.profiles 
@@ -107,54 +111,80 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
     SELECT EXISTS (
         SELECT 1 
         FROM public.profiles 
         WHERE id = auth.uid() 
-          AND role = 'ROLE_MANAGER' 
+          AND role = 'ROLE_MANAGER'::public.app_role 
           AND active = TRUE
     );
 $$;
 
--- 7. Função Trigger para Criação Segura de Profile a partir de auth.users
+-- 7. Trigger de Proteção contra Escalada de Privilégios e Troca de Empresa em Profiles
+CREATE OR REPLACE FUNCTION public.protect_profile_sensitive_fields()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    -- REGRA 1: O identificador (id) e a empresa (company_id) NUNCA podem ser alterados em UPDATE
+    IF NEW.id IS DISTINCT FROM OLD.id THEN
+        RAISE EXCEPTION 'Acesso Negado: O identificador de usuário não pode ser alterado.' USING ERRCODE = '42501';
+    END IF;
+
+    IF NEW.company_id IS DISTINCT FROM OLD.company_id THEN
+        RAISE EXCEPTION 'Acesso Negado: A empresa vinculada ao perfil não pode ser alterada.' USING ERRCODE = '42501';
+    END IF;
+
+    -- REGRA 2: Usuários comuns (não gerentes) NÃO podem alterar role, active ou username
+    IF auth.uid() = OLD.id AND NOT public.is_auth_manager() THEN
+        IF NEW.role IS DISTINCT FROM OLD.role THEN
+            RAISE EXCEPTION 'Acesso Negado: Usuários comuns não podem alterar o próprio cargo/permissões.' USING ERRCODE = '42501';
+        END IF;
+
+        IF NEW.active IS DISTINCT FROM OLD.active THEN
+            RAISE EXCEPTION 'Acesso Negado: Usuários comuns não podem alterar o status de ativação do perfil.' USING ERRCODE = '42501';
+        END IF;
+
+        IF NEW.username IS DISTINCT FROM OLD.username THEN
+            RAISE EXCEPTION 'Acesso Negado: O nome de usuário não pode ser alterado diretamente pelo perfil do usuário.' USING ERRCODE = '42501';
+        END IF;
+    END IF;
+
+    -- REGRA 3: O Gerente não pode desativar a si próprio nem rebaixar o próprio cargo
+    IF auth.uid() = OLD.id AND public.is_auth_manager() THEN
+        IF NEW.active = FALSE THEN
+            RAISE EXCEPTION 'Operação Inválida: O gerente não pode desativar a própria conta.' USING ERRCODE = '42501';
+        END IF;
+        IF NEW.role IS DISTINCT FROM 'ROLE_MANAGER'::public.app_role THEN
+            RAISE EXCEPTION 'Operação Inválida: O gerente não pode rebaixar o próprio cargo.' USING ERRCODE = '42501';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_protect_profile_sensitive_fields ON public.profiles;
+CREATE TRIGGER tr_protect_profile_sensitive_fields
+    BEFORE UPDATE ON public.profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION public.protect_profile_sensitive_fields();
+
+-- 8. Função Trigger para auth.users (Segura contra metadata fraudulenta)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
-DECLARE
-    v_company_id UUID;
-    v_username TEXT;
-    v_full_name TEXT;
-    v_role_text TEXT;
-    v_role public.app_role;
 BEGIN
-    -- Extração dos metadados fornecidos no cadastro administrativo
-    v_company_id := (NEW.raw_user_meta_data->>'company_id')::UUID;
-    v_username := COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1));
-    v_full_name := COALESCE(NEW.raw_user_meta_data->>'full_name', v_username);
-    v_role_text := COALESCE(NEW.raw_user_meta_data->>'role', 'ROLE_INSPECTOR');
-
-    IF v_company_id IS NOT NULL THEN
-        BEGIN
-            v_role := v_role_text::public.app_role;
-        EXCEPTION WHEN OTHERS THEN
-            v_role := 'ROLE_INSPECTOR'::public.app_role;
-        END;
-
-        INSERT INTO public.profiles (id, company_id, username, full_name, role, active)
-        VALUES (NEW.id, v_company_id, LOWER(TRIM(v_username)), TRIM(v_full_name), v_role, TRUE)
-        ON CONFLICT (id) DO UPDATE
-        SET 
-            company_id = EXCLUDED.company_id,
-            username = EXCLUDED.username,
-            full_name = EXCLUDED.full_name,
-            updated_at = NOW();
-    END IF;
-
+    -- SEGURANÇA: raw_user_meta_data NÃO é utilizado para definir company_id ou role.
+    -- O provisionamento seguro de perfis com permissões é realizado exclusivamente via RPC de Onboarding (register_company_with_manager)
+    -- ou via Edge Function / Backend autenticado com service_role chamado por um ROLE_MANAGER verificado.
     RETURN NEW;
 END;
 $$;
@@ -165,47 +195,60 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_new_user();
 
--- 8. RPC para Registro Inicial de Empresa e Gerente (Onboarding)
+-- 9. RPC Protegida para Onboarding de Empresa e Gerente
 CREATE OR REPLACE FUNCTION public.register_company_with_manager(
     p_company_name TEXT,
     p_company_slug TEXT,
     p_full_name TEXT,
-    p_username TEXT,
-    p_user_id UUID
+    p_username TEXT
 )
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
+    v_user_id UUID;
     v_company_id UUID;
     v_clean_slug TEXT;
     v_clean_username TEXT;
 BEGIN
+    -- 1. Obter e validar o usuário autenticado na sessão atual
+    v_user_id := auth.uid();
+    IF v_user_id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Acesso não autenticado.');
+    END IF;
+
+    -- 2. Impedir que um usuário já vinculado a uma empresa crie outra empresa
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_user_id) THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Usuário já está vinculado a uma empresa.');
+    END IF;
+
+    -- 3. Sanitização e validação de formato
     v_clean_slug := LOWER(TRIM(p_company_slug));
     v_clean_username := LOWER(TRIM(p_username));
 
-    -- Validação de existência do slug
+    IF LENGTH(v_clean_slug) < 3 OR v_clean_slug !~ '^[a-z0-9_-]+$' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'O identificador (slug) deve ter no mínimo 3 caracteres alfanuméricos.');
+    END IF;
+
+    IF LENGTH(v_clean_username) < 3 OR v_clean_username !~ '^[a-z0-9_.-]+$' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'O nome de usuário deve ter no mínimo 3 caracteres alfanuméricos.');
+    END IF;
+
+    -- 4. Validar se o slug já está em uso
     IF EXISTS (SELECT 1 FROM public.companies WHERE slug = v_clean_slug) THEN
         RETURN jsonb_build_object('success', false, 'message', 'Este identificador (slug) de empresa já está em uso.');
     END IF;
 
-    -- Inserir empresa
+    -- 5. Criar a empresa
     INSERT INTO public.companies (name, slug, active)
     VALUES (TRIM(p_company_name), v_clean_slug, TRUE)
     RETURNING id INTO v_company_id;
 
-    -- Inserir ou atualizar perfil do usuário como Gerente
+    -- 6. Criar o profile do usuário como ROLE_MANAGER
     INSERT INTO public.profiles (id, company_id, username, full_name, role, active)
-    VALUES (p_user_id, v_company_id, v_clean_username, TRIM(p_full_name), 'ROLE_MANAGER', TRUE)
-    ON CONFLICT (id) DO UPDATE
-    SET company_id = v_company_id,
-        username = v_clean_username,
-        full_name = TRIM(p_full_name),
-        role = 'ROLE_MANAGER',
-        active = TRUE,
-        updated_at = NOW();
+    VALUES (v_user_id, v_company_id, v_clean_username, TRIM(p_full_name), 'ROLE_MANAGER'::public.app_role, TRUE);
 
     RETURN jsonb_build_object(
         'success', true, 
@@ -217,24 +260,64 @@ BEGIN
 END;
 $$;
 
--- 9. Políticas RLS: public.companies
+-- 10. RPC Segura para Consulta Pública de Empresa por Slug no Login (Sem expor dados administrativos)
+CREATE OR REPLACE FUNCTION public.get_company_login_info(p_slug TEXT)
+RETURNS TABLE (
+    id UUID,
+    name TEXT,
+    slug TEXT,
+    logo_url TEXT,
+    active BOOLEAN
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT 
+        c.id,
+        c.name,
+        c.slug,
+        c.logo_url,
+        c.active
+    FROM public.companies c
+    WHERE c.slug = LOWER(TRIM(p_slug))
+      AND c.active = TRUE
+    LIMIT 1;
+$$;
+
+-- 11. Permissões Granulares (GRANT / REVOKE)
+REVOKE ALL ON FUNCTION public.get_auth_company_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_auth_company_id() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.get_auth_user_role() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_auth_user_role() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.is_auth_manager() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_auth_manager() TO authenticated;
+
+REVOKE ALL ON FUNCTION public.register_company_with_manager(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.register_company_with_manager(TEXT, TEXT, TEXT, TEXT) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.get_company_login_info(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_company_login_info(TEXT) TO anon, authenticated;
+
+-- 12. Políticas RLS: public.companies
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 
+-- Remover qualquer policy anônima permissiva anterior
+DROP POLICY IF EXISTS "Permitir consulta publica de empresas ativas por slug" ON public.companies;
 DROP POLICY IF EXISTS "Usuarios autenticados podem ver sua propria empresa" ON public.companies;
+DROP POLICY IF EXISTS "Gerentes podem atualizar os dados de sua propria empresa" ON public.companies;
+
+-- Somente membros autenticados podem consultar os dados completos da própria empresa
 CREATE POLICY "Usuarios autenticados podem ver sua propria empresa"
     ON public.companies
     FOR SELECT
     TO authenticated
     USING (id = public.get_auth_company_id());
 
-DROP POLICY IF EXISTS "Permitir consulta publica de empresas ativas por slug" ON public.companies;
-CREATE POLICY "Permitir consulta publica de empresas ativas por slug"
-    ON public.companies
-    FOR SELECT
-    TO anon
-    USING (active = TRUE);
-
-DROP POLICY IF EXISTS "Gerentes podem atualizar os dados de sua propria empresa" ON public.companies;
+-- Somente gerentes autenticados podem atualizar dados da própria empresa
 CREATE POLICY "Gerentes podem atualizar os dados de sua propria empresa"
     ON public.companies
     FOR UPDATE
@@ -242,39 +325,45 @@ CREATE POLICY "Gerentes podem atualizar os dados de sua propria empresa"
     USING (id = public.get_auth_company_id() AND public.is_auth_manager())
     WITH CHECK (id = public.get_auth_company_id() AND public.is_auth_manager());
 
--- 10. Políticas RLS: public.profiles
+-- 13. Políticas RLS: public.profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Perfis visiveis somente por membros da mesma empresa" ON public.profiles;
+DROP POLICY IF EXISTS "Gerentes podem inserir perfis na sua empresa" ON public.profiles;
+DROP POLICY IF EXISTS "Usuarios podem atualizar seu proprio perfil" ON public.profiles;
+DROP POLICY IF EXISTS "Usuarios podem atualizar perfil na sua empresa" ON public.profiles;
+DROP POLICY IF EXISTS "Gerentes podem excluir membros de sua empresa" ON public.profiles;
+
+-- Visualização: Apenas membros pertencentes à mesma empresa
 CREATE POLICY "Perfis visiveis somente por membros da mesma empresa"
     ON public.profiles
     FOR SELECT
     TO authenticated
     USING (company_id = public.get_auth_company_id());
 
-DROP POLICY IF EXISTS "Gerentes podem inserir perfis na sua empresa" ON public.profiles;
+-- Inserção: Somente gerentes autenticados da empresa
 CREATE POLICY "Gerentes podem inserir perfis na sua empresa"
     ON public.profiles
     FOR INSERT
     TO authenticated
     WITH CHECK (company_id = public.get_auth_company_id() AND public.is_auth_manager());
 
-DROP POLICY IF EXISTS "Usuarios podem atualizar seu proprio perfil" ON public.profiles;
-CREATE POLICY "Usuarios podem atualizar seu proprio perfil"
+-- Atualização: Usuário na sua empresa (protegido adicionalmente pelo trigger de campos sensíveis)
+CREATE POLICY "Usuarios podem atualizar perfil na sua empresa"
     ON public.profiles
     FOR UPDATE
     TO authenticated
-    USING (id = auth.uid() OR (company_id = public.get_auth_company_id() AND public.is_auth_manager()))
+    USING (company_id = public.get_auth_company_id() AND (id = auth.uid() OR public.is_auth_manager()))
     WITH CHECK (company_id = public.get_auth_company_id());
 
-DROP POLICY IF EXISTS "Gerentes podem excluir membros de sua empresa" ON public.profiles;
+-- Exclusão / Desativação: Somente gerentes da empresa (sem excluir a si próprio)
 CREATE POLICY "Gerentes podem excluir membros de sua empresa"
     ON public.profiles
     FOR DELETE
     TO authenticated
     USING (company_id = public.get_auth_company_id() AND public.is_auth_manager() AND id <> auth.uid());
 
--- 11. Preservação da Tabela Existente de Vistorias (Inspections)
+-- 14. Preservação Intacta da Tabela de Vistorias (Inspections)
 CREATE TABLE IF NOT EXISTS public.inspections (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -304,7 +393,7 @@ CREATE TRIGGER tr_inspections_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_updated_at();
 
--- 12. Storage Bucket para Fotos
+-- 15. Storage Bucket para Fotos
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('inspection-photos', 'inspection-photos', true)
 ON CONFLICT (id) DO NOTHING;
