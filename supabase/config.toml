@@ -1,0 +1,23 @@
+# ==============================================================================
+# CONFIGURAÇÃO DECLARATIVA DO SUPABASE CLI — VISTORIA YZZY
+# ==============================================================================
+
+project_id = "dgeczjzbohmveonqxxzv"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["https://*.vercel.app"]
+jwt_expiry = 3600
+enable_signup = false
+
+# Configuração da Edge Function pública de login (pré-autenticação)
+[functions.login-with-username]
+verify_jwt = false
