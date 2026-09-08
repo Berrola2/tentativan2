@@ -1,23 +1,27 @@
+// ==============================================================================
+// CONTEXTO DE AUTENTICAÇÃO OFICIAL — VISTORIA YZZY
+// ==============================================================================
+// Gerenciamento reativo do estado da sessão oficial do Supabase Auth
+// ==============================================================================
+
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { 
   AuthSession, 
   AuthUser, 
-  Company, 
   UserRole, 
   LoginCredentials, 
   AuthActionResult 
 } from '../types/auth';
 import { getSupabaseClient } from '../services/supabaseClient';
 import { 
-  loginEmployee, 
+  loginWithUsername, 
   logoutUser, 
-  fetchProfileAndCompany 
-} from '../services/authService';
+  fetchCurrentUserData 
+} from '../services/auth';
 
 interface AuthContextType {
   session: AuthSession | null;
   user: AuthUser | null;
-  company: Company | null;
   role: UserRole | null;
   isAuthenticated: boolean;
   isManager: boolean;
@@ -26,7 +30,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<AuthActionResult<AuthSession>>;
   logout: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -37,41 +41,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const client = getSupabaseClient();
 
-  // Carrega os dados de perfil e empresa para o usuário autenticado
-  const loadUserData = useCallback(async (userId: string, accessToken?: string, refreshToken?: string, expiresAt?: number) => {
+  // Carrega os dados de perfil e empresa do usuário autenticado no Supabase
+  const loadUserData = useCallback(async (
+    userId: string, 
+    accessToken: string, 
+    refreshToken: string, 
+    expiresAt?: number
+  ) => {
     try {
-      const data = await fetchProfileAndCompany(userId);
-      if (!data) {
-        setSession(null);
-        await client.auth.signOut();
-        return;
-      }
-
-      // Se empresa ou usuário estiverem desativados, encerra a sessão
-      if (!data.company.active || !data.user.active) {
-        console.warn('Acesso revogado: empresa ou usuário desativado.');
+      const userData = await fetchCurrentUserData(userId);
+      if (!userData) {
         setSession(null);
         await client.auth.signOut();
         return;
       }
 
       const activeSession: AuthSession = {
-        user: data.user,
-        company: data.company,
         accessToken,
         refreshToken,
         expiresAt,
+        user: userData,
+        company: {
+          id: userData.companyId,
+          name: userData.companyName,
+          slug: userData.companySlug,
+          active: true,
+        },
         loggedAt: new Date().toISOString(),
       };
 
       setSession(activeSession);
     } catch (err) {
-      console.error('Erro ao carregar dados do usuário autenticado:', err);
+      console.error('Erro ao sincronizar perfil do usuário autenticado:', err);
       setSession(null);
     }
   }, [client]);
 
-  // Inicialização e escuta das mudanças de estado da sessão do Supabase
+  // Inicialização da sessão e escuta das mudanças de autenticação do Supabase
   useEffect(() => {
     let isMounted = true;
 
@@ -87,7 +93,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           );
         }
       } catch (err) {
-        console.error('Erro ao verificar sessão inicial:', err);
+        console.warn('Verificação de sessão inicial concluída:', err);
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -97,19 +103,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initAuth();
 
-    // Listener para eventos de autenticação do Supabase
+    // Listener oficial do Supabase Auth
     const { data: { subscription } } = client.auth.onAuthStateChange(async (event, currentAuthSession) => {
       if (!isMounted) return;
 
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (currentAuthSession?.user) {
-          await loadUserData(
-            currentAuthSession.user.id,
-            currentAuthSession.access_token,
-            currentAuthSession.refresh_token,
-            currentAuthSession.expires_at
-          );
-        }
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && currentAuthSession?.user) {
+        await loadUserData(
+          currentAuthSession.user.id,
+          currentAuthSession.access_token,
+          currentAuthSession.refresh_token,
+          currentAuthSession.expires_at
+        );
       } else if (event === 'SIGNED_OUT') {
         setSession(null);
       }
@@ -126,18 +130,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(async (credentials: LoginCredentials): Promise<AuthActionResult<AuthSession>> => {
     setIsLoading(true);
     try {
-      const res = await loginEmployee(
-        credentials.companySlug,
-        credentials.username,
-        credentials.password
-      );
-
+      const res = await loginWithUsername(credentials);
       if (res.success && res.data) {
         setSession(res.data);
         return { success: true, data: res.data };
       }
-
-      return { success: false, error: res.error || 'Credenciais inválidas.' };
+      return { 
+        success: false, 
+        error: res.error || 'Usuário ou senha inválidos.',
+        retryAfterSeconds: res.retryAfterSeconds,
+      };
     } finally {
       setIsLoading(false);
     }
@@ -154,9 +156,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Função para recarregar o perfil
-  const refreshProfile = useCallback(async (): Promise<void> => {
-    if (session?.user.id) {
+  // Função para recarregar dados do usuário
+  const refreshUser = useCallback(async (): Promise<void> => {
+    if (session?.user.id && session.accessToken && session.refreshToken) {
       await loadUserData(
         session.user.id,
         session.accessToken,
@@ -168,13 +170,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const value = useMemo<AuthContextType>(() => {
     const user = session?.user || null;
-    const company = session?.company || null;
     const role = user?.role || null;
 
     return {
       session,
       user,
-      company,
       role,
       isAuthenticated: !!session && !!user,
       isManager: role === 'ROLE_MANAGER',
@@ -183,9 +183,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isLoading,
       login,
       logout,
-      refreshProfile,
+      refreshUser,
     };
-  }, [session, isLoading, login, logout, refreshProfile]);
+  }, [session, isLoading, login, logout, refreshUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

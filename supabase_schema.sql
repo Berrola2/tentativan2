@@ -1,5 +1,5 @@
 -- ==============================================================================
--- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 2.1 (HARDENING DE SEGURANÇA)
+-- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 3 (AUTENTICAÇÃO REAL COM SUPABASE)
 -- ==============================================================================
 
 -- 1. Extensões Essenciais
@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
     username TEXT NOT NULL,
     full_name TEXT NOT NULL,
+    auth_email TEXT NOT NULL UNIQUE, -- Identificador técnico interno (ex: usr_<uuid>@auth.yzzy.internal)
     role public.app_role NOT NULL DEFAULT 'ROLE_INSPECTOR',
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -50,10 +51,22 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- Índices de performance para perfis
 CREATE INDEX IF NOT EXISTS idx_profiles_company_id ON public.profiles(company_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_username ON public.profiles(username);
+CREATE INDEX IF NOT EXISTS idx_profiles_auth_email ON public.profiles(auth_email);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_active ON public.profiles(active);
 
--- 5. Função Utilitária para Atualização de Timestamp (updated_at)
+-- 5. Tabela de Rate Limiting para Autenticação (Server-Side)
+CREATE TABLE IF NOT EXISTS public.auth_rate_limits (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    identifier TEXT NOT NULL UNIQUE, -- IP ou combinação "slug:username"
+    attempt_count INT NOT NULL DEFAULT 1,
+    last_attempt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    locked_until TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_identifier ON public.auth_rate_limits(identifier);
+
+-- 6. Função Utilitária para Atualização de Timestamp (updated_at)
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER 
 LANGUAGE plpgsql
@@ -79,7 +92,7 @@ CREATE TRIGGER tr_profiles_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_updated_at();
 
--- 6. Funções Auxiliares Seguras para RLS (Sem recursão e com search_path seguro)
+-- 7. Funções Auxiliares Seguras para RLS (Sem recursão e com search_path seguro)
 CREATE OR REPLACE FUNCTION public.get_auth_company_id()
 RETURNS UUID
 LANGUAGE sql
@@ -122,7 +135,7 @@ AS $$
     );
 $$;
 
--- 7. Trigger de Proteção contra Escalada de Privilégios e Troca de Empresa em Profiles
+-- 8. Trigger de Proteção contra Escalada de Privilégios e Troca de Empresa em Profiles
 CREATE OR REPLACE FUNCTION public.protect_profile_sensitive_fields()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -130,13 +143,17 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-    -- REGRA 1: O identificador (id) e a empresa (company_id) NUNCA podem ser alterados em UPDATE
+    -- REGRA 1: O identificador (id), a empresa (company_id) e o auth_email NUNCA podem ser alterados em UPDATE
     IF NEW.id IS DISTINCT FROM OLD.id THEN
         RAISE EXCEPTION 'Acesso Negado: O identificador de usuário não pode ser alterado.' USING ERRCODE = '42501';
     END IF;
 
     IF NEW.company_id IS DISTINCT FROM OLD.company_id THEN
         RAISE EXCEPTION 'Acesso Negado: A empresa vinculada ao perfil não pode ser alterada.' USING ERRCODE = '42501';
+    END IF;
+
+    IF NEW.auth_email IS DISTINCT FROM OLD.auth_email THEN
+        RAISE EXCEPTION 'Acesso Negado: O identificador de autenticação interno não pode ser alterado.' USING ERRCODE = '42501';
     END IF;
 
     -- REGRA 2: Usuários comuns (não gerentes) NÃO podem alterar role, active ou username
@@ -174,33 +191,12 @@ CREATE TRIGGER tr_protect_profile_sensitive_fields
     FOR EACH ROW
     EXECUTE FUNCTION public.protect_profile_sensitive_fields();
 
--- 8. Função Trigger para auth.users (Segura contra metadata fraudulenta)
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-    -- SEGURANÇA: raw_user_meta_data NÃO é utilizado para definir company_id ou role.
-    -- O provisionamento seguro de perfis com permissões é realizado exclusivamente via RPC de Onboarding (register_company_with_manager)
-    -- ou via Edge Function / Backend autenticado com service_role chamado por um ROLE_MANAGER verificado.
-    RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW
-    EXECUTE FUNCTION public.handle_new_user();
-
--- 9. RPC Protegida para Onboarding de Empresa e Gerente
-CREATE OR REPLACE FUNCTION public.register_company_with_manager(
-    p_company_name TEXT,
-    p_company_slug TEXT,
-    p_full_name TEXT,
-    p_username TEXT
+-- 9. Função Segura de Rate Limiting para Autenticação
+CREATE OR REPLACE FUNCTION public.check_and_record_login_attempt(
+    p_identifier TEXT,
+    p_max_attempts INT DEFAULT 5,
+    p_window_seconds INT DEFAULT 300,  -- 5 minutos
+    p_lock_seconds INT DEFAULT 900     -- 15 minutos de bloqueio
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -208,59 +204,109 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-    v_user_id UUID;
-    v_company_id UUID;
-    v_clean_slug TEXT;
-    v_clean_username TEXT;
+    v_record public.auth_rate_limits%ROWTYPE;
+    v_now TIMESTAMPTZ := NOW();
+    v_locked_until TIMESTAMPTZ;
+    v_remaining_seconds INT;
 BEGIN
-    -- 1. Obter e validar o usuário autenticado na sessão atual
-    v_user_id := auth.uid();
-    IF v_user_id IS NULL THEN
-        RETURN jsonb_build_object('success', false, 'message', 'Acesso não autenticado.');
+    SELECT * INTO v_record FROM public.auth_rate_limits WHERE identifier = p_identifier FOR UPDATE;
+
+    IF FOUND THEN
+        -- Verificar se está atualmente bloqueado
+        IF v_record.locked_until IS NOT NULL AND v_record.locked_until > v_now THEN
+            v_remaining_seconds := EXTRACT(EPOCH FROM (v_record.locked_until - v_now))::INT;
+            RETURN jsonb_build_object('allowed', false, 'locked', true, 'retry_after_seconds', v_remaining_seconds);
+        END IF;
+
+        -- Se a janela expirou, reseta o contador
+        IF v_record.last_attempt + (p_window_seconds || ' seconds')::INTERVAL < v_now THEN
+            UPDATE public.auth_rate_limits
+            SET attempt_count = 1,
+                last_attempt = v_now,
+                locked_until = NULL
+            WHERE identifier = p_identifier;
+
+            RETURN jsonb_build_object('allowed', true, 'locked', false, 'attempt_count', 1);
+        ELSE
+            -- Incrementa tentativa
+            IF v_record.attempt_count + 1 >= p_max_attempts THEN
+                v_locked_until := v_now + (p_lock_seconds || ' seconds')::INTERVAL;
+                UPDATE public.auth_rate_limits
+                SET attempt_count = v_record.attempt_count + 1,
+                    last_attempt = v_now,
+                    locked_until = v_locked_until
+                WHERE identifier = p_identifier;
+
+                RETURN jsonb_build_object('allowed', false, 'locked', true, 'retry_after_seconds', p_lock_seconds);
+            ELSE
+                UPDATE public.auth_rate_limits
+                SET attempt_count = v_record.attempt_count + 1,
+                    last_attempt = v_now,
+                    locked_until = NULL
+                WHERE identifier = p_identifier;
+
+                RETURN jsonb_build_object('allowed', true, 'locked', false, 'attempt_count', v_record.attempt_count + 1);
+            END IF;
+        END IF;
+    ELSE
+        -- Primeiro registro
+        INSERT INTO public.auth_rate_limits (identifier, attempt_count, last_attempt, locked_until)
+        VALUES (p_identifier, 1, v_now, NULL);
+
+        RETURN jsonb_build_object('allowed', true, 'locked', false, 'attempt_count', 1);
     END IF;
-
-    -- 2. Impedir que um usuário já vinculado a uma empresa crie outra empresa
-    IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_user_id) THEN
-        RETURN jsonb_build_object('success', false, 'message', 'Usuário já está vinculado a uma empresa.');
-    END IF;
-
-    -- 3. Sanitização e validação de formato
-    v_clean_slug := LOWER(TRIM(p_company_slug));
-    v_clean_username := LOWER(TRIM(p_username));
-
-    IF LENGTH(v_clean_slug) < 3 OR v_clean_slug !~ '^[a-z0-9_-]+$' THEN
-        RETURN jsonb_build_object('success', false, 'message', 'O identificador (slug) deve ter no mínimo 3 caracteres alfanuméricos.');
-    END IF;
-
-    IF LENGTH(v_clean_username) < 3 OR v_clean_username !~ '^[a-z0-9_.-]+$' THEN
-        RETURN jsonb_build_object('success', false, 'message', 'O nome de usuário deve ter no mínimo 3 caracteres alfanuméricos.');
-    END IF;
-
-    -- 4. Validar se o slug já está em uso
-    IF EXISTS (SELECT 1 FROM public.companies WHERE slug = v_clean_slug) THEN
-        RETURN jsonb_build_object('success', false, 'message', 'Este identificador (slug) de empresa já está em uso.');
-    END IF;
-
-    -- 5. Criar a empresa
-    INSERT INTO public.companies (name, slug, active)
-    VALUES (TRIM(p_company_name), v_clean_slug, TRUE)
-    RETURNING id INTO v_company_id;
-
-    -- 6. Criar o profile do usuário como ROLE_MANAGER
-    INSERT INTO public.profiles (id, company_id, username, full_name, role, active)
-    VALUES (v_user_id, v_company_id, v_clean_username, TRIM(p_full_name), 'ROLE_MANAGER'::public.app_role, TRUE);
-
-    RETURN jsonb_build_object(
-        'success', true, 
-        'company_id', v_company_id,
-        'company_slug', v_clean_slug,
-        'username', v_clean_username,
-        'message', 'Empresa e Gerente cadastrados com sucesso!'
-    );
 END;
 $$;
 
--- 10. RPC Segura para Consulta Pública de Empresa por Slug no Login (Sem expor dados administrativos)
+-- Resetar rate limit após login bem-sucedido
+CREATE OR REPLACE FUNCTION public.reset_login_rate_limit(p_identifier TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    DELETE FROM public.auth_rate_limits WHERE identifier = p_identifier;
+END;
+$$;
+
+-- 10. Função Interna Segura para Resolver Identidade Interna (Apenas Service Role / Edge Functions)
+CREATE OR REPLACE FUNCTION public.resolve_user_auth_email(
+    p_company_slug TEXT,
+    p_username TEXT
+)
+RETURNS TABLE (
+    user_id UUID,
+    auth_email TEXT,
+    full_name TEXT,
+    role public.app_role,
+    company_id UUID,
+    company_name TEXT,
+    company_slug TEXT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT 
+        p.id AS user_id,
+        p.auth_email,
+        p.full_name,
+        p.role,
+        c.id AS company_id,
+        c.name AS company_name,
+        c.slug AS company_slug
+    FROM public.profiles p
+    JOIN public.companies c ON c.id = p.company_id
+    WHERE c.slug = LOWER(TRIM(p_company_slug))
+      AND c.active = TRUE
+      AND p.username = LOWER(TRIM(p_username))
+      AND p.active = TRUE
+    LIMIT 1;
+$$;
+
+-- 11. RPC Segura para Consulta Pública de Empresa por Slug no Login
 CREATE OR REPLACE FUNCTION public.get_company_login_info(p_slug TEXT)
 RETURNS TABLE (
     id UUID,
@@ -286,7 +332,7 @@ AS $$
     LIMIT 1;
 $$;
 
--- 11. Permissões Granulares (GRANT / REVOKE)
+-- 12. Permissões Granulares (GRANT / REVOKE)
 REVOKE ALL ON FUNCTION public.get_auth_company_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_auth_company_id() TO authenticated;
 
@@ -296,16 +342,22 @@ GRANT EXECUTE ON FUNCTION public.get_auth_user_role() TO authenticated;
 REVOKE ALL ON FUNCTION public.is_auth_manager() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_auth_manager() TO authenticated;
 
-REVOKE ALL ON FUNCTION public.register_company_with_manager(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.register_company_with_manager(TEXT, TEXT, TEXT, TEXT) TO authenticated;
+-- Funções de rate limit e resolução de identidade: restritas a service_role e anon/auth controladas
+REVOKE ALL ON FUNCTION public.resolve_user_auth_email(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.resolve_user_auth_email(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.check_and_record_login_attempt(TEXT, INT, INT, INT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.check_and_record_login_attempt(TEXT, INT, INT, INT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.reset_login_rate_limit(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reset_login_rate_limit(TEXT) TO service_role;
 
 REVOKE ALL ON FUNCTION public.get_company_login_info(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_company_login_info(TEXT) TO anon, authenticated;
 
--- 12. Políticas RLS: public.companies
+-- 13. Políticas RLS: public.companies
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 
--- Remover qualquer policy anônima permissiva anterior
 DROP POLICY IF EXISTS "Permitir consulta publica de empresas ativas por slug" ON public.companies;
 DROP POLICY IF EXISTS "Usuarios autenticados podem ver sua propria empresa" ON public.companies;
 DROP POLICY IF EXISTS "Gerentes podem atualizar os dados de sua propria empresa" ON public.companies;
@@ -325,12 +377,11 @@ CREATE POLICY "Gerentes podem atualizar os dados de sua propria empresa"
     USING (id = public.get_auth_company_id() AND public.is_auth_manager())
     WITH CHECK (id = public.get_auth_company_id() AND public.is_auth_manager());
 
--- 13. Políticas RLS: public.profiles
+-- 14. Políticas RLS: public.profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Perfis visiveis somente por membros da mesma empresa" ON public.profiles;
 DROP POLICY IF EXISTS "Gerentes podem inserir perfis na sua empresa" ON public.profiles;
-DROP POLICY IF EXISTS "Usuarios podem atualizar seu proprio perfil" ON public.profiles;
 DROP POLICY IF EXISTS "Usuarios podem atualizar perfil na sua empresa" ON public.profiles;
 DROP POLICY IF EXISTS "Gerentes podem excluir membros de sua empresa" ON public.profiles;
 
@@ -363,7 +414,11 @@ CREATE POLICY "Gerentes podem excluir membros de sua empresa"
     TO authenticated
     USING (company_id = public.get_auth_company_id() AND public.is_auth_manager() AND id <> auth.uid());
 
--- 14. Preservação Intacta da Tabela de Vistorias (Inspections)
+-- 15. Políticas RLS: public.auth_rate_limits (Server-Only)
+ALTER TABLE public.auth_rate_limits ENABLE ROW LEVEL SECURITY;
+-- Nenhuma policy criada para anon ou authenticated: tabela acessível apenas por service_role e funções SECURITY DEFINER
+
+-- 16. Preservação Intacta da Tabela de Vistorias (Inspections)
 CREATE TABLE IF NOT EXISTS public.inspections (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -393,7 +448,7 @@ CREATE TRIGGER tr_inspections_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_updated_at();
 
--- 15. Storage Bucket para Fotos
+-- 17. Storage Bucket para Fotos
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('inspection-photos', 'inspection-photos', true)
 ON CONFLICT (id) DO NOTHING;

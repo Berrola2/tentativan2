@@ -104,6 +104,8 @@ export async function fetchProfileAndCompany(userId: string): Promise<{ user: Au
     const authUser: AuthUser = {
       id: profile.id,
       companyId: profile.company_id,
+      companyName: company.name,
+      companySlug: company.slug,
       username: profile.username,
       fullName: profile.full_name,
       role: profile.role as UserRole,
@@ -265,6 +267,8 @@ export async function fetchCompanyUsers(companyId: string): Promise<AuthUser[]> 
     }>).map((u) => ({
       id: u.id,
       companyId: u.company_id,
+      companyName: '',
+      companySlug: '',
       username: u.username,
       fullName: u.full_name,
       role: u.role as UserRole,
@@ -337,6 +341,8 @@ export async function createCompanyUser(
       data: {
         id: resp.user.id,
         companyId: resp.user.company_id,
+        companyName: '',
+        companySlug: '',
         username: resp.user.username,
         fullName: resp.user.full_name,
         role: resp.user.role as UserRole,
