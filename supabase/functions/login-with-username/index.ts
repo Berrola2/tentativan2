@@ -1,35 +1,69 @@
 // ==============================================================================
-// SUPABASE EDGE FUNCTION: login-with-username
+// SUPABASE EDGE FUNCTION: login-with-username (ETAPA 3.1 — HARDENING COMPLETO)
 // ==============================================================================
-// Autenticação oficial com Supabase Auth baseada em (companySlug + username + password)
-// Sem expor e-mail técnico interno, sem expor service_role e protegido contra enumeração.
+// Endpoint público de login oficial baseado em (companySlug + username + password).
+// Configuração recomendada no Supabase: verify_jwt = false (endpoint pré-autenticação).
 // ==============================================================================
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.4';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+/**
+ * Validação dinâmica de CORS baseada em origens autorizadas (Vercel, Localhost ou Domínio Customizado)
+ */
+function getCorsHeaders(requestOrigin: string | null): Record<string, string> {
+  const customAllowedOrigin = Deno.env.get('ALLOWED_ORIGIN');
+  let originToAllow = '*';
 
-interface LoginRequestBody {
-  companySlug?: string;
-  username?: string;
-  password?: string;
+  if (requestOrigin) {
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin);
+    const isVercel = /^https:\/\/[a-zA-Z0-9-_.]+\.vercel\.app$/.test(requestOrigin);
+    const isCustomMatch = customAllowedOrigin && (requestOrigin === customAllowedOrigin || customAllowedOrigin === '*');
+
+    if (isLocalhost || isVercel || isCustomMatch) {
+      originToAllow = requestOrigin;
+    }
+  }
+
+  return {
+    'Access-Control-Allow-Origin': originToAllow,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
+  };
 }
 
 serve(async (req: Request) => {
+  const requestOrigin = req.headers.get('origin');
+  const cors = getCorsHeaders(requestOrigin);
+
   // 1. Tratar Preflight CORS
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: cors });
   }
 
+  // 2. Bloquear Métodos Não Permitidos (Apenas POST é aceito)
   if (req.method !== 'POST') {
     return new Response(
-      JSON.stringify({ success: false, error: 'Método não permitido.' }),
-      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ success: false, error: 'Método não permitido. Utilize POST.' }),
+      { 
+        status: 405, 
+        headers: { 
+          ...cors, 
+          'Content-Type': 'application/json',
+          'Allow': 'POST, OPTIONS' 
+        } 
+      }
+    );
+  }
+
+  // 3. Validação de Content-Type
+  const contentType = req.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Content-Type inválido. Esperado application/json.' }),
+      { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
     );
   }
 
@@ -38,14 +72,76 @@ serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
     if (!supabaseUrl || !serviceRoleKey) {
-      console.error('Configuração do servidor ausente: SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY.');
+      console.error('[ERRO FATAL] Configuração do servidor ausente (SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY).');
       return new Response(
-        JSON.stringify({ success: false, error: 'Erro de configuração no servidor.' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: 'Erro de configuração interna do servidor.' }),
+        { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Cliente administrativo com Service Role (apenas dentro da Edge Function)
+    // 4. Validação de Tamanho do Payload (Máximo 4KB)
+    const rawText = await req.text();
+    if (rawText.length > 4096) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Payload excessivamente grande.' }),
+        { status: 413, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    let parsedBody: Record<string, unknown>;
+    try {
+      parsedBody = JSON.parse(rawText);
+    } catch {
+      return new Response(
+        JSON.stringify({ success: false, error: 'JSON malformado.' }),
+        { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 5. Validação Estrita de Schema (Rejeitar/Ignorar injeção de campos não autorizados)
+    const allowedKeys = new Set(['companySlug', 'username', 'password']);
+    const bodyKeys = Object.keys(parsedBody);
+    const hasForbiddenKeys = bodyKeys.some((k) => !allowedKeys.has(k));
+
+    if (hasForbiddenKeys) {
+      // Rejeita requisições com campos extras (como auth_email, role, company_id, isAdmin)
+      return new Response(
+        JSON.stringify({ success: false, error: 'Campos não autorizados no payload.' }),
+        { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const rawSlug = parsedBody.companySlug;
+    const rawUsername = parsedBody.username;
+    const rawPassword = parsedBody.password;
+
+    if (!rawSlug || !rawUsername || !rawPassword || typeof rawSlug !== 'string' || typeof rawUsername !== 'string' || typeof rawPassword !== 'string') {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Empresa, usuário e senha são obrigatórios.' }),
+        { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const companySlug = rawSlug.trim().toLowerCase();
+    const username = rawUsername.trim().toLowerCase();
+    const password = rawPassword;
+
+    // Validação estrita de formato de caracteres
+    if (companySlug.length < 2 || companySlug.length > 50 || !/^[a-z0-9_-]+$/.test(companySlug)) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (username.length < 2 || username.length > 50 || !/^[a-z0-9_.-]+$/.test(username)) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Cliente administrativo com Service Role isolado no runtime da Edge Function
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: {
         autoRefreshToken: false,
@@ -53,75 +149,68 @@ serve(async (req: Request) => {
       },
     });
 
-    // 2. Parse e Validação de Entrada
-    const body: LoginRequestBody = await req.json().catch(() => ({}));
-    const rawSlug = body.companySlug;
-    const rawUsername = body.username;
-    const rawPassword = body.password;
+    // 6. Rate Limiting Duplo (Por IP e por Conta Alvo)
+    const clientIp = req.headers.get('cf-connecting-ip') || 
+                     req.headers.get('x-real-ip') || 
+                     req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+                     'ip-desconhecido';
 
-    if (!rawSlug || !rawUsername || !rawPassword) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Empresa, usuário e senha são obrigatórios.' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const ipRateLimitKey = `ip:${clientIp}`;
+    const accountRateLimitKey = `account:${companySlug}:${username}`;
 
-    const companySlug = String(rawSlug).trim().toLowerCase();
-    const username = String(rawUsername).trim().toLowerCase();
-    const password = String(rawPassword);
+    // Verificação 1: Rate Limit por IP
+    const { data: ipLimitRes } = await supabaseAdmin.rpc('check_and_record_login_attempt', {
+      p_identifier: ipRateLimitKey,
+      p_max_attempts: 10,
+      p_window_seconds: 300,
+      p_lock_seconds: 900,
+    });
 
-    // Validação estrita de formato
-    if (companySlug.length < 2 || companySlug.length > 50 || !/^[a-z0-9_-]+$/.test(companySlug)) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    if (username.length < 2 || username.length > 50 || !/^[a-z0-9_.-]+$/.test(username)) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // 3. Rate Limiting por IP e por Conta
-    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
-                     req.headers.get('cf-connecting-ip') || 
-                     'anonymous-ip';
-    const rateLimitKey = `login:${clientIp}:${companySlug}:${username}`;
-
-    const { data: rateLimitRes, error: rateLimitErr } = await supabaseAdmin.rpc(
-      'check_and_record_login_attempt',
-      {
-        p_identifier: rateLimitKey,
-        p_max_attempts: 5,
-        p_window_seconds: 300, // 5 minutos
-        p_lock_seconds: 900,   // 15 minutos de bloqueio
-      }
-    );
-
-    if (rateLimitErr) {
-      console.warn('Falha ao verificar rate limit no PostgreSQL:', rateLimitErr);
-    } else if (rateLimitRes && !rateLimitRes.allowed) {
+    if (ipLimitRes && !ipLimitRes.allowed) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Muitas tentativas inválidas. Acesso temporariamente bloqueado. Tente novamente mais tarde.',
-          retryAfterSeconds: rateLimitRes.retry_after_seconds || 900,
+          error: 'Muitas tentativas a partir deste endereço IP. Acesso temporariamente bloqueado. Tente novamente mais tarde.',
+          retryAfterSeconds: ipLimitRes.retry_after_seconds || 900,
         }),
         { 
           status: 429, 
           headers: { 
-            ...corsHeaders, 
+            ...cors, 
             'Content-Type': 'application/json',
-            'Retry-After': String(rateLimitRes.retry_after_seconds || 900),
+            'Retry-After': String(ipLimitRes.retry_after_seconds || 900),
           } 
         }
       );
     }
 
-    // 4. Resolução Segura da Identidade Interna (auth_email)
+    // Verificação 2: Rate Limit por Conta Específica
+    const { data: accLimitRes } = await supabaseAdmin.rpc('check_and_record_login_attempt', {
+      p_identifier: accountRateLimitKey,
+      p_max_attempts: 5,
+      p_window_seconds: 300,
+      p_lock_seconds: 900,
+    });
+
+    if (accLimitRes && !accLimitRes.allowed) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Muitas tentativas inválidas para este usuário. Acesso temporariamente bloqueado. Tente novamente em alguns minutos.',
+          retryAfterSeconds: accLimitRes.retry_after_seconds || 900,
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            ...cors, 
+            'Content-Type': 'application/json',
+            'Retry-After': String(accLimitRes.retry_after_seconds || 900),
+          } 
+        }
+      );
+    }
+
+    // 7. Resolução da Identidade Interna na Tabela Privada (user_auth_identities)
     const { data: resolvedUsers, error: resolveErr } = await supabaseAdmin.rpc(
       'resolve_user_auth_email',
       {
@@ -131,10 +220,10 @@ serve(async (req: Request) => {
     );
 
     if (resolveErr || !resolvedUsers || resolvedUsers.length === 0) {
-      // Erro genérico anti-enumeração
+      // Resposta genérica anti-enumeração
       return new Response(
         JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -144,11 +233,11 @@ serve(async (req: Request) => {
     if (!internalAuthEmail) {
       return new Response(
         JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 5. Autenticação Oficial no Supabase Auth usando o e-mail técnico interno
+    // 8. Autenticação Oficial no Supabase Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
       email: internalAuthEmail,
       password: password,
@@ -157,14 +246,17 @@ serve(async (req: Request) => {
     if (authError || !authData.session) {
       return new Response(
         JSON.stringify({ success: false, error: 'Usuário ou senha inválidos.' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
-    // 6. Reset do contador de Rate Limit após sucesso
-    await supabaseAdmin.rpc('reset_login_rate_limit', { p_identifier: rateLimitKey }).catch(() => {});
+    // 9. Reset dos Contadores de Rate Limit após Sucesso
+    await Promise.allSettled([
+      supabaseAdmin.rpc('reset_login_rate_limit', { p_identifier: ipRateLimitKey }),
+      supabaseAdmin.rpc('reset_login_rate_limit', { p_identifier: accountRateLimitKey }),
+    ]);
 
-    // 7. Retorno dos dados de sessão oficiais
+    // 10. Retorno Limpo dos Tokens Oficiais e Metadados do Usuário
     const responsePayload = {
       success: true,
       session: {
@@ -187,15 +279,15 @@ serve(async (req: Request) => {
 
     return new Response(
       JSON.stringify(responsePayload),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
     );
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Erro interno durante a autenticação.';
-    console.error('Exceção na Edge Function login-with-username:', errorMsg);
+    const errorMsg = err instanceof Error ? err.message : 'Erro interno.';
+    console.error('[ERRO LOGIN]', errorMsg);
 
     return new Response(
       JSON.stringify({ success: false, error: 'Erro ao processar autenticação. Tente novamente.' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
     );
   }
 });

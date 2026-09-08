@@ -1,5 +1,5 @@
 -- ==============================================================================
--- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 3 (AUTENTICAÇÃO REAL COM SUPABASE)
+-- SCHEMA SUPABASE PARA VISTORIA YZZY — ETAPA 3.1 (HARDENING & TABELA PRIVADA DE AUTH)
 -- ==============================================================================
 
 -- 1. Extensões Essenciais
@@ -35,12 +35,12 @@ CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies(slug);
 CREATE INDEX IF NOT EXISTS idx_companies_active ON public.companies(active);
 
 -- 4. Tabela de Perfis de Usuário (Profiles) vinculada a auth.users
+-- ATENÇÃO DE SEGURANÇA: Não contém auth_email (isolado em tabela privada server-only)
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
     username TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    auth_email TEXT NOT NULL UNIQUE, -- Identificador técnico interno (ex: usr_<uuid>@auth.yzzy.internal)
     role public.app_role NOT NULL DEFAULT 'ROLE_INSPECTOR',
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -51,14 +51,30 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- Índices de performance para perfis
 CREATE INDEX IF NOT EXISTS idx_profiles_company_id ON public.profiles(company_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_username ON public.profiles(username);
-CREATE INDEX IF NOT EXISTS idx_profiles_auth_email ON public.profiles(auth_email);
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_active ON public.profiles(active);
 
--- 5. Tabela de Rate Limiting para Autenticação (Server-Side)
+-- 5. Tabela Privada de Identidades Internas de Autenticação (Server-Only)
+-- Inacessível por SELECT de anon e authenticated (sem policies, RLS ativado, REVOKE ALL)
+CREATE TABLE IF NOT EXISTS public.user_auth_identities (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
+    username TEXT NOT NULL,
+    auth_email TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_auth_identities_search ON public.user_auth_identities(company_id, username);
+CREATE INDEX IF NOT EXISTS idx_user_auth_identities_email ON public.user_auth_identities(auth_email);
+
+ALTER TABLE public.user_auth_identities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.user_auth_identities FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.user_auth_identities TO service_role;
+
+-- 6. Tabela de Rate Limiting para Autenticação (Server-Side)
 CREATE TABLE IF NOT EXISTS public.auth_rate_limits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    identifier TEXT NOT NULL UNIQUE, -- IP ou combinação "slug:username"
+    identifier TEXT NOT NULL UNIQUE, -- IP ou combinação "account:slug:username"
     attempt_count INT NOT NULL DEFAULT 1,
     last_attempt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     locked_until TIMESTAMPTZ
@@ -66,7 +82,11 @@ CREATE TABLE IF NOT EXISTS public.auth_rate_limits (
 
 CREATE INDEX IF NOT EXISTS idx_rate_limits_identifier ON public.auth_rate_limits(identifier);
 
--- 6. Função Utilitária para Atualização de Timestamp (updated_at)
+ALTER TABLE public.auth_rate_limits ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.auth_rate_limits FROM PUBLIC, anon, authenticated;
+GRANT ALL ON TABLE public.auth_rate_limits TO service_role;
+
+-- 7. Função Utilitária para Atualização de Timestamp (updated_at)
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER 
 LANGUAGE plpgsql
@@ -92,7 +112,7 @@ CREATE TRIGGER tr_profiles_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_updated_at();
 
--- 7. Funções Auxiliares Seguras para RLS (Sem recursão e com search_path seguro)
+-- 8. Funções Auxiliares Seguras para RLS (Sem recursão e com search_path seguro)
 CREATE OR REPLACE FUNCTION public.get_auth_company_id()
 RETURNS UUID
 LANGUAGE sql
@@ -135,7 +155,7 @@ AS $$
     );
 $$;
 
--- 8. Trigger de Proteção contra Escalada de Privilégios e Troca de Empresa em Profiles
+-- 9. Trigger de Proteção contra Escalada de Privilégios e Troca de Empresa em Profiles
 CREATE OR REPLACE FUNCTION public.protect_profile_sensitive_fields()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -143,17 +163,13 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-    -- REGRA 1: O identificador (id), a empresa (company_id) e o auth_email NUNCA podem ser alterados em UPDATE
+    -- REGRA 1: O identificador (id) e a empresa (company_id) NUNCA podem ser alterados em UPDATE
     IF NEW.id IS DISTINCT FROM OLD.id THEN
         RAISE EXCEPTION 'Acesso Negado: O identificador de usuário não pode ser alterado.' USING ERRCODE = '42501';
     END IF;
 
     IF NEW.company_id IS DISTINCT FROM OLD.company_id THEN
         RAISE EXCEPTION 'Acesso Negado: A empresa vinculada ao perfil não pode ser alterada.' USING ERRCODE = '42501';
-    END IF;
-
-    IF NEW.auth_email IS DISTINCT FROM OLD.auth_email THEN
-        RAISE EXCEPTION 'Acesso Negado: O identificador de autenticação interno não pode ser alterado.' USING ERRCODE = '42501';
     END IF;
 
     -- REGRA 2: Usuários comuns (não gerentes) NÃO podem alterar role, active ou username
@@ -191,7 +207,7 @@ CREATE TRIGGER tr_protect_profile_sensitive_fields
     FOR EACH ROW
     EXECUTE FUNCTION public.protect_profile_sensitive_fields();
 
--- 9. Função Segura de Rate Limiting para Autenticação
+-- 10. Função Segura de Rate Limiting para Autenticação (Server-Side)
 CREATE OR REPLACE FUNCTION public.check_and_record_login_attempt(
     p_identifier TEXT,
     p_max_attempts INT DEFAULT 5,
@@ -270,7 +286,7 @@ BEGIN
 END;
 $$;
 
--- 10. Função Interna Segura para Resolver Identidade Interna (Apenas Service Role / Edge Functions)
+-- 11. Função Interna Segura para Resolver Identidade Interna (Apenas Service Role / Edge Functions)
 CREATE OR REPLACE FUNCTION public.resolve_user_auth_email(
     p_company_slug TEXT,
     p_username TEXT
@@ -291,22 +307,23 @@ SET search_path = public, pg_temp
 AS $$
     SELECT 
         p.id AS user_id,
-        p.auth_email,
+        uai.auth_email,
         p.full_name,
         p.role,
         c.id AS company_id,
         c.name AS company_name,
         c.slug AS company_slug
-    FROM public.profiles p
+    FROM public.user_auth_identities uai
+    JOIN public.profiles p ON p.id = uai.user_id
     JOIN public.companies c ON c.id = p.company_id
     WHERE c.slug = LOWER(TRIM(p_company_slug))
       AND c.active = TRUE
-      AND p.username = LOWER(TRIM(p_username))
+      AND uai.username = LOWER(TRIM(p_username))
       AND p.active = TRUE
     LIMIT 1;
 $$;
 
--- 11. RPC Segura para Consulta Pública de Empresa por Slug no Login
+-- 12. RPC Segura para Consulta Pública de Empresa por Slug no Login
 CREATE OR REPLACE FUNCTION public.get_company_login_info(p_slug TEXT)
 RETURNS TABLE (
     id UUID,
@@ -332,7 +349,7 @@ AS $$
     LIMIT 1;
 $$;
 
--- 12. Permissões Granulares (GRANT / REVOKE)
+-- 13. Permissões Granulares (GRANT / REVOKE)
 REVOKE ALL ON FUNCTION public.get_auth_company_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_auth_company_id() TO authenticated;
 
@@ -342,7 +359,7 @@ GRANT EXECUTE ON FUNCTION public.get_auth_user_role() TO authenticated;
 REVOKE ALL ON FUNCTION public.is_auth_manager() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_auth_manager() TO authenticated;
 
--- Funções de rate limit e resolução de identidade: restritas a service_role e anon/auth controladas
+-- Funções de rate limit e resolução de identidade: restritas a service_role
 REVOKE ALL ON FUNCTION public.resolve_user_auth_email(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.resolve_user_auth_email(TEXT, TEXT) TO service_role;
 
@@ -355,7 +372,7 @@ GRANT EXECUTE ON FUNCTION public.reset_login_rate_limit(TEXT) TO service_role;
 REVOKE ALL ON FUNCTION public.get_company_login_info(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.get_company_login_info(TEXT) TO anon, authenticated;
 
--- 13. Políticas RLS: public.companies
+-- 14. Políticas RLS: public.companies
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Permitir consulta publica de empresas ativas por slug" ON public.companies;
@@ -377,11 +394,12 @@ CREATE POLICY "Gerentes podem atualizar os dados de sua propria empresa"
     USING (id = public.get_auth_company_id() AND public.is_auth_manager())
     WITH CHECK (id = public.get_auth_company_id() AND public.is_auth_manager());
 
--- 14. Políticas RLS: public.profiles
+-- 15. Políticas RLS: public.profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Perfis visiveis somente por membros da mesma empresa" ON public.profiles;
 DROP POLICY IF EXISTS "Gerentes podem inserir perfis na sua empresa" ON public.profiles;
+DROP POLICY IF EXISTS "Usuarios podem atualizar seu proprio perfil" ON public.profiles;
 DROP POLICY IF EXISTS "Usuarios podem atualizar perfil na sua empresa" ON public.profiles;
 DROP POLICY IF EXISTS "Gerentes podem excluir membros de sua empresa" ON public.profiles;
 
@@ -413,10 +431,6 @@ CREATE POLICY "Gerentes podem excluir membros de sua empresa"
     FOR DELETE
     TO authenticated
     USING (company_id = public.get_auth_company_id() AND public.is_auth_manager() AND id <> auth.uid());
-
--- 15. Políticas RLS: public.auth_rate_limits (Server-Only)
-ALTER TABLE public.auth_rate_limits ENABLE ROW LEVEL SECURITY;
--- Nenhuma policy criada para anon ou authenticated: tabela acessível apenas por service_role e funções SECURITY DEFINER
 
 -- 16. Preservação Intacta da Tabela de Vistorias (Inspections)
 CREATE TABLE IF NOT EXISTS public.inspections (
