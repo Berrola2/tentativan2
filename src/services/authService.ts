@@ -1,263 +1,283 @@
-import bcrypt from 'bcryptjs';
 import { getSupabaseClient } from './supabaseClient';
-import type { AuthSession, AuthUser, Company, UserRole } from '../types/auth';
-
-const AUTH_STORAGE_KEY = 'vistoriayzzy_auth_session';
+import type { 
+  AuthSession, 
+  AuthUser, 
+  Company, 
+  UserRole, 
+  AuthActionResult 
+} from '../types/auth';
 
 /**
- * Get the currently logged-in session from localStorage
+ * Normaliza slug de empresa para busca padronizada
  */
-export function getCurrentSession(): AuthSession | null {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as AuthSession;
-  } catch (e) {
-    console.warn('Failed to parse current auth session', e);
-    return null;
-  }
+export function normalizeSlug(slug: string): string {
+  return slug
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-_]/g, '');
 }
 
 /**
- * Save auth session to localStorage
+ * Busca dados visuais e status de uma empresa a partir do slug
  */
-export function saveSession(session: AuthSession): void {
-  try {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-  } catch (e) {
-    console.warn('Failed to save auth session', e);
-  }
-}
-
-/**
- * Clear the current session
- */
-export function clearSession(): void {
-  try {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-  } catch (e) {
-    console.warn('Failed to clear auth session', e);
-  }
-}
-
-/**
- * Look up company branding dynamically by Corporate Code or Slug
- */
-export async function lookupCompany(codeOrSlug: string): Promise<Company | null> {
-  const normalized = codeOrSlug.trim();
-  if (!normalized) return null;
+export async function lookupCompany(slug: string): Promise<Company | null> {
+  const cleanSlug = normalizeSlug(slug);
+  if (!cleanSlug) return null;
 
   const client = getSupabaseClient();
-  if (!client) {
-    if (normalized.toUpperCase() === 'YZZY01' || normalized.toLowerCase() === 'vistoria-yzzy') {
-      return {
-        id: 'a0000000-0000-0000-0000-000000000001',
-        slug: 'vistoria-yzzy',
-        corporateCode: 'YZZY01',
-        tradeName: 'Vistoria YZZY',
-        logoUrl: '/logo.jpg',
-        primaryColor: '#0284c7',
-      };
-    }
-    return null;
-  }
 
   try {
+    // 1. Tentar via RPC lookup_company_by_slug
+    const { data: rpcData, error: rpcError } = await client.rpc('lookup_company_by_slug', {
+      p_slug: cleanSlug,
+    });
+
+    if (!rpcError && rpcData && typeof rpcData === 'object') {
+      const resp = rpcData as { success: boolean; company?: { id: string; name: string; slug: string; logo_url?: string; active: boolean } };
+      if (resp.company) {
+        return {
+          id: resp.company.id,
+          name: resp.company.name,
+          slug: resp.company.slug,
+          logoUrl: resp.company.logo_url || '/logo.jpg',
+          active: resp.company.active,
+        };
+      }
+    }
+
+    // 2. Fallback direto via SELECT na tabela companies com RLS
     const { data, error } = await client
       .from('companies')
-      .select('*')
-      .or(`corporate_code.ilike.${normalized},slug.ilike.${normalized}`)
-      .eq('is_active', true)
+      .select('id, name, slug, logo_url, active, created_at, updated_at')
+      .ilike('slug', cleanSlug)
       .maybeSingle();
 
     if (error || !data) {
-      if (normalized.toUpperCase() === 'YZZY01' || normalized.toLowerCase() === 'vistoria-yzzy') {
-        return {
-          id: 'a0000000-0000-0000-0000-000000000001',
-          slug: 'vistoria-yzzy',
-          corporateCode: 'YZZY01',
-          tradeName: 'Vistoria YZZY',
-          logoUrl: '/logo.jpg',
-          primaryColor: '#0284c7',
-        };
-      }
       return null;
     }
 
     return {
       id: data.id,
+      name: data.name,
       slug: data.slug,
-      corporateCode: data.corporate_code,
-      tradeName: data.trade_name,
-      legalName: data.legal_name,
-      cnpj: data.cnpj,
-      phone: data.phone,
       logoUrl: data.logo_url || '/logo.jpg',
-      primaryColor: data.primary_color || '#0284c7',
+      active: data.active,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
     };
   } catch (err) {
-    console.warn('Company lookup error:', err);
+    console.warn('Falha na busca da empresa:', err);
     return null;
   }
 }
 
 /**
- * Authenticate employee using Corporate Code + Username + Password
+ * Recupera o perfil completo e a empresa vinculada ao usuário logado
  */
-export async function loginEmployee(
-  corporateCode: string,
-  username: string,
-  password: string
-): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-  const normCode = corporateCode.trim();
-  const normUser = username.trim().toLowerCase();
-  const normPass = password.trim();
-
-  if (!normCode || !normUser || !normPass) {
-    return { success: false, error: 'Por favor preencha todos os campos.' };
-  }
-
-  // 1. Fetch Company
-  const company = await lookupCompany(normCode);
-  if (!company) {
-    return { success: false, error: 'Empresa ou código corporativo não encontrado.' };
-  }
-
+export async function fetchProfileAndCompany(userId: string): Promise<{ user: AuthUser; company: Company } | null> {
   const client = getSupabaseClient();
-  if (!client) {
-    if (
-      (normCode.toUpperCase() === 'YZZY01' || normCode.toLowerCase() === 'vistoria-yzzy') &&
-      normUser === 'ricso.biella' &&
-      normPass === '123'
-    ) {
-      const session: AuthSession = {
-        company,
-        user: {
-          id: 'a0000000-0000-0000-0000-000000000001',
-          companyId: company.id,
-          username: 'ricso.biella',
-          fullName: 'Ricson Biella',
-          role: 'ROLE_MANAGER',
-        },
-        loggedAt: new Date().toISOString(),
-      };
-      saveSession(session);
-      return { success: true, session };
-    }
-    return { success: false, error: 'Não foi possível conectar ao banco de dados.' };
-  }
 
   try {
-    // 2. Fetch User in this Company
-    const { data: userRow, error: userErr } = await client
-      .from('users')
-      .select('*')
-      .eq('company_id', company.id)
-      .ilike('username', normUser)
-      .eq('is_active', true)
+    const { data: profile, error: profileErr } = await client
+      .from('profiles')
+      .select('id, company_id, username, full_name, role, active, created_at, updated_at')
+      .eq('id', userId)
       .maybeSingle();
 
-    if (userErr || !userRow) {
-      if (
-        (normCode.toUpperCase() === 'YZZY01' || normCode.toLowerCase() === 'vistoria-yzzy') &&
-        normUser === 'ricso.biella' &&
-        normPass === '123'
-      ) {
-        const session: AuthSession = {
-          company,
-          user: {
-            id: 'a0000000-0000-0000-0000-000000000001',
-            companyId: company.id,
-            username: 'ricso.biella',
-            fullName: 'Ricson Biella',
-            role: 'ROLE_MANAGER',
-          },
-          loggedAt: new Date().toISOString(),
-        };
-        saveSession(session);
-        return { success: true, session };
-      }
-      return { success: false, error: 'Usuário não encontrado nesta empresa.' };
+    if (profileErr || !profile) {
+      console.warn('Perfil não encontrado para o usuário:', userId, profileErr);
+      return null;
     }
 
-    // 3. Verify Password Hash
-    let passwordMatch = false;
-    if (userRow.password_hash) {
-      try {
-        passwordMatch = await bcrypt.compare(normPass, userRow.password_hash);
-      } catch (bcryptErr) {
-        passwordMatch = userRow.password_hash === normPass;
-      }
-    }
+    const { data: company, error: compErr } = await client
+      .from('companies')
+      .select('id, name, slug, logo_url, active, created_at, updated_at')
+      .eq('id', profile.company_id)
+      .maybeSingle();
 
-    if (!passwordMatch) {
-      if (normPass === '123' && normUser === 'ricso.biella') {
-        passwordMatch = true;
-      } else {
-        return { success: false, error: 'Senha incorreta. Tente novamente.' };
-      }
+    if (compErr || !company) {
+      console.warn('Empresa não encontrada para o perfil:', profile.company_id, compErr);
+      return null;
     }
 
     const authUser: AuthUser = {
-      id: userRow.id,
-      companyId: userRow.company_id,
-      username: userRow.username,
-      fullName: userRow.full_name || userRow.username,
-      role: userRow.role || 'ROLE_INSPECTOR',
-      cpf: userRow.cpf,
-      creci: userRow.creci,
+      id: profile.id,
+      companyId: profile.company_id,
+      username: profile.username,
+      fullName: profile.full_name,
+      role: profile.role as UserRole,
+      active: profile.active,
     };
 
-    const session: AuthSession = {
-      user: authUser,
-      company,
-      loggedAt: new Date().toISOString(),
+    const companyData: Company = {
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+      logoUrl: company.logo_url || '/logo.jpg',
+      active: company.active,
+      createdAt: company.created_at,
+      updatedAt: company.updated_at,
     };
 
-    saveSession(session);
-    return { success: true, session };
-  } catch (err: any) {
-    console.error('Authentication error:', err);
-    return { success: false, error: `Erro na autenticação: ${err.message || 'Tente novamente'}` };
+    return { user: authUser, company: companyData };
+  } catch (e) {
+    console.error('Exceção ao recuperar perfil e empresa:', e);
+    return null;
   }
 }
 
 /**
- * Fetch all users for a company (Manager only)
+ * Autenticação de colaborador usando Company Slug + Username + Senha
+ * Arquitetura: Resolve o identificador interno via RPC seguro e autentica nativamente via Supabase Auth
+ */
+export async function loginEmployee(
+  companySlug: string,
+  username: string,
+  password: string
+): Promise<AuthActionResult<AuthSession>> {
+  const cleanSlug = normalizeSlug(companySlug);
+  const cleanUser = username.trim().toLowerCase();
+  const cleanPass = password.trim();
+
+  if (!cleanSlug || !cleanUser || !cleanPass) {
+    return { success: false, error: 'Por favor, preencha todos os campos.' };
+  }
+
+  const client = getSupabaseClient();
+
+  try {
+    // 1. Obter o identificador de login de forma segura no backend Supabase
+    const { data: idData, error: idErr } = await client.rpc('get_login_identifier', {
+      p_company_slug: cleanSlug,
+      p_username: cleanUser,
+    });
+
+    if (idErr) {
+      console.warn('Erro ao consultar identificador de login:', idErr);
+      return { 
+        success: false, 
+        error: 'Não foi possível validar as credenciais. Verifique a conexão com o Supabase.' 
+      };
+    }
+
+    const idResp = idData as { success: boolean; identifier?: string; error?: string };
+    if (!idResp || !idResp.success || !idResp.identifier) {
+      return { 
+        success: false, 
+        error: idResp?.error || 'Empresa, usuário ou senha inválidos.' 
+      };
+    }
+
+    // 2. Efetuar login oficial no Supabase Auth com o identificador interno
+    const { data: authData, error: authErr } = await client.auth.signInWithPassword({
+      email: idResp.identifier,
+      password: cleanPass,
+    });
+
+    if (authErr || !authData.user) {
+      return { 
+        success: false, 
+        error: 'Empresa, usuário ou senha inválidos.' 
+      };
+    }
+
+    // 3. Recuperar Profile e Company associados e protegidos por RLS
+    const account = await fetchProfileAndCompany(authData.user.id);
+    if (!account) {
+      await client.auth.signOut();
+      return { 
+        success: false, 
+        error: 'Perfil de usuário não localizado no sistema.' 
+      };
+    }
+
+    // 4. Validar se usuário ou empresa foram desativados
+    if (!account.company.active) {
+      await client.auth.signOut();
+      return { 
+        success: false, 
+        error: 'Esta empresa está temporariamente desativada.' 
+      };
+    }
+
+    if (!account.user.active) {
+      await client.auth.signOut();
+      return { 
+        success: false, 
+        error: 'Seu usuário está desativado. Contate o administrador.' 
+      };
+    }
+
+    const session: AuthSession = {
+      user: account.user,
+      company: account.company,
+      accessToken: authData.session?.access_token,
+      refreshToken: authData.session?.refresh_token,
+      expiresAt: authData.session?.expires_at,
+      loggedAt: new Date().toISOString(),
+    };
+
+    return { success: true, data: session };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Falha na autenticação';
+    return { success: false, error: `Erro na autenticação: ${message}` };
+  }
+}
+
+/**
+ * Encerra a sessão atual no Supabase Auth
+ */
+export async function logoutUser(): Promise<void> {
+  const client = getSupabaseClient();
+  try {
+    await client.auth.signOut();
+  } catch (err) {
+    console.warn('Erro ao realizar logout:', err);
+  }
+}
+
+/**
+ * Lista todos os usuários de uma empresa (Exclusivo para ROLE_MANAGER / Membros autorizados)
  */
 export async function fetchCompanyUsers(companyId: string): Promise<AuthUser[]> {
   const client = getSupabaseClient();
-  if (!client) return [];
 
   try {
     const { data, error } = await client
-      .from('users')
-      .select('*')
+      .from('profiles')
+      .select('id, company_id, username, full_name, role, active, created_at, updated_at')
       .eq('company_id', companyId)
       .order('created_at', { ascending: false });
 
     if (error || !data) {
-      console.warn('Error fetching company users', error);
+      console.warn('Erro ao buscar usuários da empresa:', error);
       return [];
     }
 
-    return data.map((u: any) => ({
+    return (data as Array<{
+      id: string;
+      company_id: string;
+      username: string;
+      full_name: string;
+      role: string;
+      active: boolean;
+    }>).map((u) => ({
       id: u.id,
       companyId: u.company_id,
       username: u.username,
-      fullName: u.full_name || u.username,
-      role: u.role || 'ROLE_INSPECTOR',
-      cpf: u.cpf,
-      creci: u.creci,
+      fullName: u.full_name,
+      role: u.role as UserRole,
+      active: u.active,
     }));
   } catch (e) {
-    console.warn('fetchCompanyUsers exception', e);
+    console.warn('Exceção ao listar usuários da empresa:', e);
     return [];
   }
 }
 
 /**
- * Create a new user in the company (Manager only)
+ * Cria um novo colaborador na empresa via RPC seguro no Supabase
  */
 export async function createCompanyUser(
   companyId: string,
@@ -266,122 +286,158 @@ export async function createCompanyUser(
     fullName: string;
     role: UserRole;
     password: string;
-    cpf?: string;
-    creci?: string;
   }
-): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
-  const client = getSupabaseClient();
-  if (!client) {
-    return { success: false, error: 'Supabase não conectado.' };
+): Promise<AuthActionResult<AuthUser>> {
+  const cleanUsername = user.username.trim().toLowerCase();
+  const cleanFullName = user.fullName.trim();
+  const cleanPassword = user.password.trim();
+
+  if (!cleanUsername || !cleanFullName || !cleanPassword) {
+    return { success: false, error: 'Preencha Nome Completo, Usuário e Senha.' };
   }
 
-  const cleanUsername = user.username.trim().toLowerCase();
-  if (!cleanUsername || !user.fullName.trim() || !user.password.trim()) {
-    return { success: false, error: 'Preencha Nome, Usuário e Senha.' };
+  if (cleanPassword.length < 6) {
+    return { success: false, error: 'A senha deve conter no mínimo 6 caracteres.' };
   }
+
+  const client = getSupabaseClient();
 
   try {
-    // Generate bcrypt salt & hash
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(user.password.trim(), salt);
-
-    const payload: any = {
-      company_id: companyId,
-      username: cleanUsername,
-      full_name: user.fullName.trim(),
-      role: user.role || 'ROLE_INSPECTOR',
-      password_hash: passwordHash,
-      is_active: true,
-    };
-
-    if (user.cpf?.trim()) payload.cpf = user.cpf.trim();
-    if (user.creci?.trim()) payload.creci = user.creci.trim();
-
-    let { data, error } = await client
-      .from('users')
-      .insert(payload)
-      .select()
-      .single();
-
-    // If database table doesn't have cpf or creci columns yet, fallback seamlessly
-    if (error && (error.message.includes('cpf') || error.message.includes('creci') || error.code === 'PGRST204')) {
-      delete payload.cpf;
-      delete payload.creci;
-      const retry = await client.from('users').insert(payload).select().single();
-      data = retry.data;
-      error = retry.error;
-    }
+    const { data, error } = await client.rpc('create_company_user', {
+      p_company_id: companyId,
+      p_username: cleanUsername,
+      p_full_name: cleanFullName,
+      p_role: user.role,
+      p_password: cleanPassword,
+    });
 
     if (error) {
-      if (error.code === '23505') {
-        return { success: false, error: `O nome de usuário "${cleanUsername}" já existe nesta empresa.` };
-      }
       return { success: false, error: `Erro ao criar usuário: ${error.message}` };
+    }
+
+    const resp = data as { 
+      success: boolean; 
+      error?: string; 
+      user?: { 
+        id: string; 
+        company_id: string; 
+        username: string; 
+        full_name: string; 
+        role: string; 
+        active: boolean 
+      } 
+    };
+
+    if (!resp.success || !resp.user) {
+      return { success: false, error: resp.error || 'Erro ao criar usuário.' };
     }
 
     return {
       success: true,
-      user: {
-        id: data.id,
-        companyId: data.company_id,
-        username: data.username,
-        fullName: data.full_name,
-        role: data.role,
-        cpf: data.cpf,
-        creci: data.creci,
+      data: {
+        id: resp.user.id,
+        companyId: resp.user.company_id,
+        username: resp.user.username,
+        fullName: resp.user.full_name,
+        role: resp.user.role as UserRole,
+        active: resp.user.active,
       },
     };
-  } catch (e: any) {
-    return { success: false, error: `Erro inesperado: ${e.message}` };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro inesperado';
+    return { success: false, error: `Erro inesperado: ${message}` };
   }
 }
 
 /**
- * Delete a user from company (Manager only)
- */
-export async function deleteCompanyUser(userId: string): Promise<{ success: boolean; error?: string }> {
-  const client = getSupabaseClient();
-  if (!client) {
-    return { success: false, error: 'Supabase não conectado.' };
-  }
-
-  try {
-    const { error } = await client.from('users').delete().eq('id', userId);
-    if (error) {
-      return { success: false, error: error.message };
-    }
-    return { success: true };
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Update a user password (Manager only)
+ * Atualiza a senha de um usuário via RPC seguro
  */
 export async function updateCompanyUserPassword(
   userId: string,
   newPassword: string
-): Promise<{ success: boolean; error?: string }> {
-  const client = getSupabaseClient();
-  if (!client) {
-    return { success: false, error: 'Supabase não conectado.' };
+): Promise<AuthActionResult> {
+  if (!newPassword || newPassword.trim().length < 6) {
+    return { success: false, error: 'A nova senha deve ter no mínimo 6 caracteres.' };
   }
 
-  try {
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(newPassword.trim(), salt);
+  const client = getSupabaseClient();
 
-    const { error } = await client
-      .from('users')
-      .update({ password_hash: passwordHash })
-      .eq('id', userId);
+  try {
+    const { data, error } = await client.rpc('update_company_user_password', {
+      p_target_user_id: userId,
+      p_new_password: newPassword.trim(),
+    });
 
     if (error) {
       return { success: false, error: error.message };
     }
+
+    const resp = data as { success: boolean; error?: string; message?: string };
+    if (!resp.success) {
+      return { success: false, error: resp.error || 'Erro ao atualizar senha.' };
+    }
+
     return { success: true };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro inesperado';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Ativa ou desativa um usuário da empresa
+ */
+export async function toggleCompanyUserActive(
+  userId: string,
+  active: boolean
+): Promise<AuthActionResult> {
+  const client = getSupabaseClient();
+
+  try {
+    const { data, error } = await client.rpc('toggle_company_user_active', {
+      p_target_user_id: userId,
+      p_active: active,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    const resp = data as { success: boolean; error?: string };
+    if (!resp.success) {
+      return { success: false, error: resp.error || 'Erro ao alterar status do usuário.' };
+    }
+
+    return { success: true };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro inesperado';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Remove um usuário da empresa (Exclusivo para ROLE_MANAGER)
+ */
+export async function deleteCompanyUser(userId: string): Promise<AuthActionResult> {
+  const client = getSupabaseClient();
+
+  try {
+    const { data, error } = await client.rpc('delete_company_user', {
+      p_target_user_id: userId,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    const resp = data as { success: boolean; error?: string };
+    if (!resp.success) {
+      return { success: false, error: resp.error || 'Erro ao remover usuário.' };
+    }
+
+    return { success: true };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro inesperado';
+    return { success: false, error: message };
   }
 }

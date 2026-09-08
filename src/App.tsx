@@ -10,9 +10,9 @@ import type {
   InspectionData, 
   Room, 
   InspectionItem, 
-  QuickTemplate,
-  SupabaseConfig,
-  InspectionType
+  QuickTemplate, 
+  SupabaseConfig, 
+  InspectionType 
 } from './types/inspection';
 import { 
   saveInspectionToDb, 
@@ -26,15 +26,11 @@ import {
   fetchInspectionsFromSupabase, 
   deleteInspectionFromSupabase 
 } from './services/supabaseClient';
-import { getCurrentSession, clearSession } from './services/authService';
-import type { AuthSession } from './types/auth';
 
 // Components
 import { ToastProvider, useToast } from './components/Toast';
 import { Navbar } from './components/Navbar';
 import { LobbyView } from './components/LobbyView';
-import { LoginView } from './components/LoginView';
-import { UserManagementModal } from './components/UserManagementModal';
 import { ProtectedClientViewer } from './components/ProtectedClientViewer';
 import { AudioInspectionView } from './components/AudioInspectionView';
 import { PropertyHeaderCard } from './components/PropertyHeaderCard';
@@ -49,7 +45,7 @@ import { BackupSyncModal } from './components/BackupSyncModal';
 import { AddRoomModal } from './components/AddRoomModal';
 import { ConfirmModal } from './components/ConfirmModal';
 
-// Clean, zero-mock new inspection helper
+// Clean helper to create a fresh inspection
 const createEmptyInspection = (): InspectionData => {
   const today = new Date().toISOString().split('T')[0];
   const currentTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -72,7 +68,7 @@ const createEmptyInspection = (): InspectionData => {
     propertyCity: '',
     propertyState: '',
     propertyZip: '',
-    companyName: '',
+    companyName: 'Vistoria YZZY',
     companyCnpj: '',
     companyPhone: '',
     waterMeter: '',
@@ -105,9 +101,6 @@ const createEmptyInspection = (): InspectionData => {
 function MainApp() {
   const { showToast } = useToast();
 
-  // Multi-tenant auth session
-  const [authSession, setAuthSession] = useState<AuthSession | null>(getCurrentSession);
-
   // Navigation: 'lobby' | 'inspection' | 'audio-inspection'
   const [currentView, setCurrentView] = useState<'lobby' | 'inspection' | 'audio-inspection'>('lobby');
 
@@ -121,7 +114,6 @@ function MainApp() {
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
   const [isBackupSyncOpen, setIsBackupSyncOpen] = useState(false);
-  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
   const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
   const [isAddRoomOpen, setIsAddRoomOpen] = useState(false);
   const [selectedItemForEdit, setSelectedItemForEdit] = useState<InspectionItem | null>(null);
@@ -165,7 +157,7 @@ function MainApp() {
       setInspectionsList(list);
       return list;
     } catch (e) {
-      console.warn('Error loading inspections list', e);
+      console.warn('Erro ao carregar lista de vistorias:', e);
       return [];
     }
   };
@@ -173,9 +165,8 @@ function MainApp() {
   const handleSyncCloud = async (silent = false) => {
     setIsSyncingCloud(true);
     try {
-      const res = await fetchInspectionsFromSupabase(supabaseConfig, authSession?.company.id);
+      const res = await fetchInspectionsFromSupabase(supabaseConfig);
       if (res.success && res.data && res.data.length > 0) {
-        // Save all remote inspections into local Dexie IndexedDB
         for (const remoteInsp of res.data) {
           await saveInspectionToDb(remoteInsp);
         }
@@ -192,7 +183,7 @@ function MainApp() {
       } else if (!silent) {
         showToast('Nuvem verificada: suas vistorias já estão atualizadas.', 'info');
       }
-    } catch (err) {
+    } catch {
       if (!silent) {
         showToast('Não foi possível sincronizar com a nuvem agora.', 'error');
       }
@@ -220,8 +211,7 @@ function MainApp() {
           }
         }
 
-        // Auto-fetch from Supabase on startup with company isolation
-        fetchInspectionsFromSupabase(activeCfg, authSession?.company.id).then(async (res) => {
+        fetchInspectionsFromSupabase(activeCfg).then(async (res) => {
           if (res.success && res.data && res.data.length > 0) {
             for (const remoteInsp of res.data) {
               await saveInspectionToDb(remoteInsp);
@@ -230,12 +220,12 @@ function MainApp() {
           }
         }).catch(() => {});
       } catch (err) {
-        console.error('Error loading data', err);
+        console.error('Erro ao carregar dados:', err);
       }
     }
 
     loadData();
-  }, [authSession]);
+  }, []);
 
   // Sync active room when current inspection changes
   useEffect(() => {
@@ -256,16 +246,15 @@ function MainApp() {
         try {
           await saveInspectionToDb(currentInspection);
           await reloadInspections();
-          // Push to cloud in background with company isolation
-          uploadInspectionToSupabase(currentInspection, supabaseConfig, authSession?.company.id).catch(() => {});
+          uploadInspectionToSupabase(currentInspection, supabaseConfig).catch(() => {});
         } catch (e) {
-          console.warn('Autosave error', e);
+          console.warn('Erro ao salvar automaticamente:', e);
         }
       }, 500);
 
       return () => clearTimeout(timer);
     }
-  }, [currentInspection, supabaseConfig, authSession]);
+  }, [currentInspection, supabaseConfig]);
 
   // Handlers
   const handleSelectInspectionFromLobby = (selected: InspectionData) => {
@@ -280,12 +269,7 @@ function MainApp() {
     const profile = await getAppProfile();
     const fresh = createEmptyInspection();
 
-    if (authSession) {
-      fresh.companyName = authSession.company.tradeName;
-      fresh.companyLogo = authSession.company.logoUrl;
-      fresh.inspectorName = authSession.user.fullName;
-      fresh.inspectorCpfCreci = authSession.user.creci || authSession.user.cpf || '';
-    } else if (profile) {
+    if (profile) {
       if (profile.companyName) fresh.companyName = profile.companyName;
       if (profile.companyCnpj) fresh.companyCnpj = profile.companyCnpj;
       if (profile.companyPhone) fresh.companyPhone = profile.companyPhone;
@@ -295,13 +279,12 @@ function MainApp() {
     }
 
     await saveInspectionToDb(fresh);
-    // Push immediately to Supabase
-    uploadInspectionToSupabase(fresh, supabaseConfig, authSession?.company.id).catch(() => {});
+    uploadInspectionToSupabase(fresh, supabaseConfig).catch(() => {});
     await reloadInspections();
     setCurrentInspection(fresh);
     setActiveRoomId(fresh.rooms[0]?.id || '');
     setCurrentView('inspection');
-    showToast('Nova vistoria criada e sincronizada!', 'success');
+    showToast('Nova vistoria criada com sucesso!', 'success');
   };
 
   const handleDeleteInspection = (id: string, title: string) => {
@@ -312,7 +295,6 @@ function MainApp() {
     if (!inspectionToDelete) return;
     const { id } = inspectionToDelete;
     await deleteInspectionFromDb(id);
-    // Delete from Supabase in background
     deleteInspectionFromSupabase(id, supabaseConfig).catch(() => {});
     const remaining = await reloadInspections();
     if (currentInspection.id === id) {
@@ -494,7 +476,7 @@ function MainApp() {
     0
   );
 
-  // If accessed via client share link (View-Only mode for Tenant/Landlord)
+  // If accessed via client share link (View-Only mode)
   if (clientInspection) {
     return (
       <ProtectedClientViewer
@@ -507,22 +489,10 @@ function MainApp() {
     );
   }
 
-  // If employee is not logged in, render the secure LoginView
-  if (!authSession) {
-    return (
-      <LoginView
-        onLoginSuccess={(session) => {
-          setAuthSession(session);
-          showToast(`Bem-vindo, ${session.user.fullName}!`, 'success');
-        }}
-      />
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-brand-500 selection:text-white pb-24 md:pb-8">
       
-      {/* 1. Corporate Navbar */}
+      {/* 1. Header Navbar */}
       <Navbar
         currentView={currentView}
         onNavigate={(view) => setCurrentView(view)}
@@ -531,16 +501,9 @@ function MainApp() {
         onOpenTemplates={() => setIsTemplatesOpen(true)}
         onOpenPropertyInfo={() => setIsPropertyInfoOpen(true)}
         onOpenBackupSync={() => setIsBackupSyncOpen(true)}
-        onOpenUserManagement={() => setIsUserManagementOpen(true)}
         onGeneratePdf={() => setIsPdfPreviewOpen(true)}
         isGeneratingPdf={false}
         totalPhotos={totalPhotosCount}
-        currentSession={authSession}
-        onLogout={() => {
-          clearSession();
-          setAuthSession(null);
-          showToast('Sessão encerrada com sucesso.', 'info');
-        }}
       />
 
       {/* 2. Main Content Router */}
@@ -717,13 +680,6 @@ function MainApp() {
           setSupabaseConfig(cfg);
           saveAppProfile({ supabaseConfig: cfg });
         }}
-      />
-
-      {/* User & Team Management Modal (Manager only) */}
-      <UserManagementModal
-        isOpen={isUserManagementOpen}
-        onClose={() => setIsUserManagementOpen(false)}
-        currentSession={authSession}
       />
 
       {/* Add Room In-App Modal */}

@@ -5,12 +5,9 @@ import {
   Building, 
   DownloadCloud, 
   LayoutDashboard,
-  Mic,
-  LogOut,
-  Users
+  Mic
 } from 'lucide-react';
 import type { InspectionType } from '../types/inspection';
-import type { AuthSession } from '../types/auth';
 
 interface NavbarProps {
   currentView: 'lobby' | 'inspection' | 'audio-inspection';
@@ -20,12 +17,9 @@ interface NavbarProps {
   onOpenTemplates?: () => void;
   onOpenPropertyInfo?: () => void;
   onOpenBackupSync: () => void;
-  onOpenUserManagement?: () => void;
   onGeneratePdf?: () => void;
   isGeneratingPdf?: boolean;
   totalPhotos?: number;
-  currentSession?: AuthSession | null;
-  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -36,27 +30,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenTemplates,
   onOpenPropertyInfo,
   onOpenBackupSync,
-  onOpenUserManagement,
   onGeneratePdf,
   isGeneratingPdf = false,
   totalPhotos = 0,
-  currentSession,
-  onLogout,
 }) => {
   const typeBadges: Record<InspectionType, string> = {
     Entrada: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     Saída: 'bg-amber-50 text-amber-700 border-amber-200',
     Periódica: 'bg-sky-50 text-sky-700 border-sky-200',
     Constatação: 'bg-purple-50 text-purple-700 border-purple-200',
-  };
-
-  const getRoleLabel = (role?: string) => {
-    switch (role) {
-      case 'ROLE_MANAGER': return 'Gerente';
-      case 'ROLE_INSPECTOR': return 'Vistoriador';
-      case 'ROLE_ADMIN_VIEWER': return 'Administrativo';
-      default: return 'Colaborador';
-    }
   };
 
   return (
@@ -71,14 +53,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-2.5 cursor-pointer group"
             >
               <img 
-                src={currentSession?.company.logoUrl || '/logo.jpg'} 
-                alt={currentSession?.company.tradeName || 'Vistoria YZZY'} 
+                src="/logo.jpg" 
+                alt="Vistoria YZZY" 
                 className="h-10 w-auto max-w-[130px] sm:max-w-[160px] object-contain rounded-xl shadow-sm border border-slate-200/60 bg-white p-0.5 group-hover:scale-105 transition-transform" 
               />
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 font-display">
-                    {currentSession?.company.tradeName || 'Vistoria YZZY'}
+                    Vistoria YZZY
                   </span>
                   {currentView !== 'lobby' && (
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${typeBadges[inspectionType]}`}>
@@ -88,7 +70,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
                 <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium line-clamp-1">
                   {currentView === 'lobby' 
-                    ? 'Serviços de Inspeção e Avaliação' 
+                    ? 'Painel de Vistorias Imobiliárias' 
                     : `${inspectionTitle || 'Editando Laudo'}${totalPhotos > 0 ? ` • ${totalPhotos} fotos` : ''}`}
                 </span>
               </div>
@@ -146,18 +128,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Manager Team & User Management */}
-            {currentSession?.user.role === 'ROLE_MANAGER' && onOpenUserManagement && (
-              <button
-                onClick={onOpenUserManagement}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-bold rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-sm transition-all"
-                title="Gerenciar Equipe e Usuários"
-              >
-                <Users className="w-3.5 h-3.5 text-purple-600" />
-                <span className="hidden sm:inline">Equipe</span>
-              </button>
-            )}
-
             {/* Backup & Cloud Sync */}
             <button
               onClick={onOpenBackupSync}
@@ -165,7 +135,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Backup JSON e Nuvem Supabase"
             >
               <DownloadCloud className="w-3.5 h-3.5 text-indigo-600" />
-              <span className="hidden lg:inline">Nuvem</span>
+              <span className="hidden sm:inline">Nuvem</span>
             </button>
 
             {/* Primary Generate PDF Button */}
@@ -178,29 +148,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <FileText className="w-4 h-4 shrink-0" />
                 <span>{isGeneratingPdf ? 'Gerando...' : 'Gerar PDF'}</span>
               </button>
-            )}
-
-            {/* Logged in User Badge and Logout Button */}
-            {currentSession && (
-              <div className="flex items-center gap-1.5 pl-1.5 sm:pl-2.5 border-l border-slate-200 ml-1">
-                <div className="hidden sm:flex flex-col text-right">
-                  <span className="text-[11px] font-bold text-slate-800 leading-tight truncate max-w-[110px]">
-                    {currentSession.user.fullName}
-                  </span>
-                  <span className="text-[9px] font-semibold text-brand-600">
-                    {getRoleLabel(currentSession.user.role)}
-                  </span>
-                </div>
-                {onLogout && (
-                  <button
-                    onClick={onLogout}
-                    className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors"
-                    title="Sair do sistema (Logout)"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
             )}
 
           </div>

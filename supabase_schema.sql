@@ -1,56 +1,14 @@
--- =======================================================
--- SCRIPT SQL COMPLETO PARA O SUPABASE - VISTORIA YZZY
--- Como usar:
--- 1. Abra o painel do seu projeto no Supabase (https://supabase.com/dashboard)
--- 2. No menu lateral esquerdo, clique em "SQL Editor"
--- 3. Clique em "New Query", cole todo este código e clique em "RUN" (ou CTRL + ENTER)
--- =======================================================
+-- ==============================================================================
+-- SCHEMA SUPABASE PARA VISTORIA YZZY (DIRETO E SEM RESTRIÇÃO DE LOGIN)
+-- ==============================================================================
 
--- 1. Habilitar extensão de UUID e criptografia
+-- 1. Extensões essenciais
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- 2. Tabela de Empresas (Companies / Tenants)
-CREATE TABLE IF NOT EXISTS public.companies (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    slug VARCHAR(60) NOT NULL UNIQUE,
-    corporate_code VARCHAR(20) NOT NULL UNIQUE,
-    trade_name VARCHAR(150) NOT NULL,
-    legal_name VARCHAR(200),
-    cnpj VARCHAR(18),
-    phone VARCHAR(20),
-    email VARCHAR(120),
-    logo_url TEXT,
-    primary_color VARCHAR(10) DEFAULT '#0284c7',
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- 3. Tabela de Usuários (Users / Colaboradores)
-CREATE TABLE IF NOT EXISTS public.users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
-    username VARCHAR(50) NOT NULL,
-    full_name VARCHAR(120) NOT NULL,
-    role VARCHAR(30) NOT NULL DEFAULT 'ROLE_INSPECTOR',
-    password_hash TEXT NOT NULL,
-    cpf VARCHAR(14),
-    creci VARCHAR(30),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    CONSTRAINT uq_company_username UNIQUE (company_id, username)
-);
-
--- Adicionar colunas caso a tabela users já tenha sido criada anteriormente
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS cpf VARCHAR(14);
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS creci VARCHAR(30);
-
--- 4. Tabela de Vistorias (Inspections)
+-- 2. Tabela de Vistorias (Inspections)
 CREATE TABLE IF NOT EXISTS public.inspections (
     id TEXT PRIMARY KEY,
-    company_id UUID REFERENCES public.companies(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     inspection_type TEXT NOT NULL DEFAULT 'Entrada',
     date TEXT,
@@ -58,41 +16,51 @@ CREATE TABLE IF NOT EXISTS public.inspections (
     tenant_name TEXT,
     property_address TEXT,
     data_json JSONB NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE public.inspections ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES public.companies(id) ON DELETE CASCADE;
-
--- 5. Habilitar e configurar Row Level Security (RLS) permissivo para a API
-ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Permitir gestao publica de empresas" ON public.companies;
-CREATE POLICY "Permitir gestao publica de empresas" ON public.companies FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Permitir gestao publica de usuarios" ON public.users;
-CREATE POLICY "Permitir gestao publica de usuarios" ON public.users FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
+-- 3. Habilitar RLS e permitir acesso público/anônimo total para sincronização
 ALTER TABLE public.inspections ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Acesso publico total para vistorias" ON public.inspections;
+DROP POLICY IF EXISTS "Isolamento multi-tenant para vistorias - SELECT" ON public.inspections;
+DROP POLICY IF EXISTS "Isolamento multi-tenant para vistorias - INSERT" ON public.inspections;
+DROP POLICY IF EXISTS "Isolamento multi-tenant para vistorias - UPDATE" ON public.inspections;
+DROP POLICY IF EXISTS "Isolamento multi-tenant para vistorias - DELETE" ON public.inspections;
 DROP POLICY IF EXISTS "Permitir acesso publico anonimo para vistorias" ON public.inspections;
-CREATE POLICY "Permitir acesso publico anonimo para vistorias" ON public.inspections FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- 6. Inserir empresa padrão: Vistoria YZZY
-INSERT INTO public.companies (id, slug, corporate_code, trade_name, logo_url)
-VALUES (
-    'a0000000-0000-0000-0000-000000000001',
-    'vistoria-yzzy',
-    'YZZY01',
-    'Vistoria YZZY',
-    '/logo.jpg'
-) ON CONFLICT (corporate_code) DO NOTHING;
+CREATE POLICY "Acesso publico total para vistorias"
+    ON public.inspections
+    FOR ALL
+    TO anon, authenticated
+    USING (true)
+    WITH CHECK (true);
 
--- 7. Inserir usuário Gerente padrão: ricso.biella / 123
-INSERT INTO public.users (company_id, username, full_name, role, password_hash)
-VALUES (
-    'a0000000-0000-0000-0000-000000000001',
-    'ricso.biella',
-    'Ricson Biella',
-    'ROLE_MANAGER',
-    crypt('123', gen_salt('bf'))
-) ON CONFLICT (company_id, username) DO NOTHING;
+-- 4. Trigger para atualização automática de updated_at
+CREATE OR REPLACE FUNCTION public.handle_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tr_inspections_updated_at ON public.inspections;
+CREATE TRIGGER tr_inspections_updated_at
+    BEFORE UPDATE ON public.inspections
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_updated_at();
+
+-- 5. Configuração do Storage Bucket para fotos de vistoria (se necessário)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('inspection-photos', 'inspection-photos', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Acesso publico storage inspection-photos" ON storage.objects;
+CREATE POLICY "Acesso publico storage inspection-photos"
+    ON storage.objects
+    FOR ALL
+    TO anon, authenticated
+    USING (bucket_id = 'inspection-photos')
+    WITH CHECK (bucket_id = 'inspection-photos');
