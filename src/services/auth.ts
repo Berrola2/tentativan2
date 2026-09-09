@@ -38,10 +38,18 @@ export async function loginWithYzzy(
     });
 
     if (error) {
-      const serverError = (data as { error?: string })?.error;
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
       return {
         success: false,
-        error: serverError || error.message || 'Login ou senha inválidos.',
+        error: serverError || (data as { error?: string })?.error || error.message || 'Login ou senha inválidos.',
       };
     }
 
@@ -137,9 +145,18 @@ export async function changeUserPassword(newPassword: string): Promise<AuthActio
     });
 
     if (error || !data?.success) {
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
       return {
         success: false,
-        error: data?.error || error?.message || 'Falha ao alterar senha.',
+        error: serverError || data?.error || error?.message || 'Falha ao alterar senha.',
       };
     }
 

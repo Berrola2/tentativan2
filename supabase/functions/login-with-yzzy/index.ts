@@ -9,17 +9,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.4';
 
 function getCorsHeaders(requestOrigin: string | null): Record<string, string> {
-  let originToAllow = '*';
-  if (requestOrigin) {
-    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin);
-    const isVercel = /^https:\/\/[a-zA-Z0-9-_.]+\.vercel\.app$/.test(requestOrigin);
-    if (isLocalhost || isVercel) {
-      originToAllow = requestOrigin;
-    }
-  }
-
   return {
-    'Access-Control-Allow-Origin': originToAllow,
+    'Access-Control-Allow-Origin': requestOrigin || '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Max-Age': '86400',
