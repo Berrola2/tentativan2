@@ -57,7 +57,17 @@ function generateTempPassword(): string {
   return pass;
 }
 
+function maskEmail(email?: string | null): string {
+  if (!email) return 'sem_email';
+  const parts = email.split('@');
+  if (parts.length < 2) return '***';
+  const user = parts[0];
+  const domain = parts[1];
+  return `${user.substring(0, 3)}***@${domain}`;
+}
+
 serve(async (req: Request) => {
+  const correlationId = crypto.randomUUID();
   const requestOrigin = req.headers.get('origin');
   const cors = getCorsHeaders(requestOrigin);
 
@@ -77,36 +87,47 @@ serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
     if (!supabaseUrl || !serviceRoleKey) {
+      console.error(`[CID:${correlationId}] [CONFIG_ERROR] SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados.`);
       return new Response(
         JSON.stringify({ success: false, error: 'Erro de configuração do servidor.' }),
         { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
-    const authHeader = req.headers.get('Authorization') || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+    console.log(`[CID:${correlationId}] [ADMIN_REQUEST_RECEIVED] Origin: ${requestOrigin || 'N/A'}`);
 
     if (!token) {
+      console.warn(`[CID:${correlationId}] [AUTH_HEADER_MISSING] Token de autenticação Bearer não fornecido.`);
       return new Response(
         JSON.stringify({ success: false, error: 'Token de autenticação não fornecido.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log(`[CID:${correlationId}] [AUTH_HEADER_PRESENT] Bearer token presente (prefix: ${token.substring(0, 10)}..., len: ${token.length})`);
+
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 1. Identificar usuário autenticado e suas permissões
+    // 1. Identificar usuário autenticado e suas credenciais via GoTrue
     const { data: { user: callerUser }, error: callerAuthErr } = await supabaseAdmin.auth.getUser(token);
 
     if (callerAuthErr || !callerUser) {
+      console.warn(`[CID:${correlationId}] [TOKEN_INVALID] Falha ao autenticar token JWT: ${callerAuthErr?.message || 'Usuário nulo'}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Sessão inválida ou expirada.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log(`[CID:${correlationId}] [TOKEN_VALID] Token validado com sucesso via GoTrue. UID: ${callerUser.id}`);
+    console.log(`[CID:${correlationId}] [USER_RESOLVED] Caller User: ${callerUser.id} | Email: ${maskEmail(callerUser.email)}`);
+
+    // 2. Consultar perfil e permissões no banco de dados (server-side)
     const { data: callerProfile, error: callerProfErr } = await supabaseAdmin
       .from('profiles')
       .select('id, company_id, role, active')
@@ -114,16 +135,20 @@ serve(async (req: Request) => {
       .single();
 
     if (callerProfErr || !callerProfile || !callerProfile.active) {
+      console.warn(`[CID:${correlationId}] [PROFILE_ERROR] Perfil não encontrado ou inativo: ${callerProfErr?.message || 'active=false'}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Usuário sem permissão ou inativo.' }),
         { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log(`[CID:${correlationId}] [PROFILE_FOUND] Role: ${callerProfile.role} | Active: ${callerProfile.active} | CompanyId: ${callerProfile.company_id || 'NULL'}`);
+
     const isSuperAdmin = callerProfile.role === 'ROLE_SUPER_ADMIN';
     const isCompanyManager = callerProfile.role === 'ROLE_MANAGER';
 
     if (!isSuperAdmin && !isCompanyManager) {
+      console.warn(`[CID:${correlationId}] [FORBIDDEN] Role ${callerProfile.role} não possui privilégios administrativos.`);
       return new Response(
         JSON.stringify({ success: false, error: 'Acesso negado. Apenas administradores e gerentes podem realizar esta operação.' }),
         { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -138,13 +163,24 @@ serve(async (req: Request) => {
     // =========================================================================
     if (action === 'create_company') {
       if (!isSuperAdmin) {
+        console.warn(`[CID:${correlationId}] [FORBIDDEN] Tentativa de create_company por não-SuperAdmin (Role: ${callerProfile.role})`);
         return new Response(
           JSON.stringify({ success: false, error: 'Apenas Super Admins podem criar novas empresas.' }),
           { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
         );
       }
 
-      const { name, slug, cnpj, phone, email, maxUsers, maxProperties, maxInspectionsMonth, managerFirstName, managerLastName } = body;
+      console.log(`[CID:${correlationId}] [ROLE_SUPER_ADMIN_CONFIRMED] Permissão de Super Admin confirmada.`);
+
+      const name = body.name?.trim();
+      const slug = body.slug?.trim();
+      const legalName = body.legalName?.trim() || name;
+      const tradeName = body.tradeName?.trim() || name;
+      const documentNumber = body.documentNumber?.trim() || body.cnpj?.trim() || null;
+      const phone = body.phone?.trim() || null;
+      const email = body.email?.trim() || null;
+      const managerFirstName = body.managerFirstName?.trim();
+      const managerLastName = body.managerLastName?.trim();
 
       if (!name || !slug) {
         return new Response(
@@ -154,30 +190,33 @@ serve(async (req: Request) => {
       }
 
       const cleanSlug = normalizeText(slug);
+      console.log(`[CID:${correlationId}] [CREATE_COMPANY_STARTED] Nome: ${name} | Slug: ${cleanSlug}`);
 
-      // Inserir empresa
+      // Inserir empresa na tabela public.companies
       const { data: newCompany, error: compErr } = await supabaseAdmin
         .from('companies')
         .insert({
-          name: name.trim(),
+          name: name,
           slug: cleanSlug,
-          cnpj: cnpj?.trim() || null,
-          phone: phone?.trim() || null,
-          email: email?.trim() || null,
-          max_users: maxUsers || 10,
-          max_properties: maxProperties || 100,
-          max_inspections_month: maxInspectionsMonth || 50,
+          legal_name: legalName,
+          trade_name: tradeName,
+          document_number: documentNumber,
+          phone: phone,
+          email: email,
           active: true,
         })
         .select()
         .single();
 
       if (compErr || !newCompany) {
+        console.error(`[CID:${correlationId}] [CREATE_COMPANY_FAILED] Erro no banco: ${compErr?.message}`);
         return new Response(
           JSON.stringify({ success: false, error: `Erro ao criar empresa: ${compErr?.message || 'Erro desconhecido'}` }),
           { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
         );
       }
+
+      console.log(`[CID:${correlationId}] [CREATE_COMPANY_SUCCESS] Empresa criada com sucesso. ID: ${newCompany.id}`);
 
       let managerInfo = null;
 
@@ -188,6 +227,8 @@ serve(async (req: Request) => {
         const loginAlias = `${normFirst}.${normLast}@${cleanSlug}.yzzy`;
         const tempPassword = generateTempPassword();
         const authEmail = `mgr_${newCompany.id.replace(/-/g, '')}@auth.yzzy.internal`;
+
+        console.log(`[CID:${correlationId}] [CREATE_MANAGER_STARTED] Alias: ${loginAlias} | AuthEmail: ${maskEmail(authEmail)}`);
 
         const { data: authCreated, error: authErr } = await supabaseAdmin.auth.admin.createUser({
           email: authEmail,
@@ -201,9 +242,9 @@ serve(async (req: Request) => {
           await supabaseAdmin.from('profiles').insert({
             id: managerId,
             company_id: newCompany.id,
-            first_name: managerFirstName.trim(),
-            last_name: managerLastName.trim(),
-            display_name: `${managerFirstName.trim()} ${managerLastName.trim()}`,
+            first_name: managerFirstName,
+            last_name: managerLastName,
+            display_name: `${managerFirstName} ${managerLastName}`,
             username: `${normFirst}.${normLast}`,
             role: 'ROLE_MANAGER',
             active: true,
@@ -220,13 +261,25 @@ serve(async (req: Request) => {
           managerInfo = {
             loginAlias,
             tempPassword,
-            fullName: `${managerFirstName.trim()} ${managerLastName.trim()}`,
+            fullName: `${managerFirstName} ${managerLastName}`,
           };
+          console.log(`[CID:${correlationId}] [CREATE_MANAGER_SUCCESS] Gerente criado com sucesso: ${managerId}`);
+        } else {
+          console.error(`[CID:${correlationId}] [CREATE_MANAGER_FAILED] Erro ao criar gerente: ${authErr?.message}`);
         }
       }
 
+      // Log de Auditoria
+      await supabaseAdmin.from('security_audit_logs').insert({
+        company_id: newCompany.id,
+        user_id: callerUser.id,
+        event_type: 'COMPANY_CREATED',
+        ip_address: req.headers.get('x-forwarded-for') || null,
+        metadata: { company_id: newCompany.id, company_name: name, correlation_id: correlationId },
+      });
+
       return new Response(
-        JSON.stringify({ success: true, company: newCompany, manager: managerInfo }),
+        JSON.stringify({ success: true, correlationId, company: newCompany, manager: managerInfo }),
         { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
@@ -244,10 +297,9 @@ serve(async (req: Request) => {
         );
       }
 
-      // Validar limites da empresa (max_users)
       const { data: comp } = await supabaseAdmin
         .from('companies')
-        .select('id, name, slug, max_users, active')
+        .select('id, name, slug, active')
         .eq('id', targetCompanyId)
         .single();
 
@@ -255,21 +307,6 @@ serve(async (req: Request) => {
         return new Response(
           JSON.stringify({ success: false, error: 'Empresa inativa ou inexistente.' }),
           { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { count: currentUsersCount } = await supabaseAdmin
-        .from('profiles')
-        .select('id', { count: 'exact', head: true })
-        .eq('company_id', targetCompanyId);
-
-      if (currentUsersCount !== null && currentUsersCount >= comp.max_users) {
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: `Limite de usuários atingido para esta empresa (${comp.max_users} usuários). Faça upgrade do plano para continuar.` 
-          }),
-          { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
         );
       }
 
@@ -366,12 +403,14 @@ serve(async (req: Request) => {
         company_id: targetCompanyId,
         user_id: callerUser.id,
         event_type: 'USER_CREATED',
-        metadata: { created_user_id: newUserId, login_alias: finalLoginAlias, role: targetRole },
+        ip_address: req.headers.get('x-forwarded-for') || null,
+        metadata: { created_user_id: newUserId, login_alias: finalLoginAlias, role: targetRole, correlation_id: correlationId },
       });
 
       return new Response(
         JSON.stringify({
           success: true,
+          correlationId,
           loginAlias: finalLoginAlias,
           tempPassword,
           user: {
@@ -389,7 +428,7 @@ serve(async (req: Request) => {
     // AÇÃO 3: ALTERAR STATUS DE USUÁRIO (ATIVAR/DESATIVAR)
     // ------------------------------------------------------------------
     if (action === 'toggle_user_status') {
-      const { targetUserId, active } = payload;
+      const { targetUserId, active } = body;
 
       const { data: targetProf } = await supabaseAdmin
         .from('profiles')
@@ -418,11 +457,12 @@ serve(async (req: Request) => {
         company_id: targetProf.company_id,
         user_id: callerUser.id,
         event_type: active ? 'USER_ENABLED' : 'USER_DISABLED',
-        metadata: { target_user_id: targetUserId },
+        ip_address: req.headers.get('x-forwarded-for') || null,
+        metadata: { target_user_id: targetUserId, correlation_id: correlationId },
       });
 
       return new Response(
-        JSON.stringify({ success: true, active: !!active }),
+        JSON.stringify({ success: true, correlationId, active: !!active }),
         { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
@@ -431,7 +471,7 @@ serve(async (req: Request) => {
     // AÇÃO 4: ALTERAR CARGO (ROLE)
     // ------------------------------------------------------------------
     if (action === 'change_user_role') {
-      const { targetUserId, newRole } = payload;
+      const { targetUserId, newRole } = body;
 
       if (!isSuperAdmin && newRole === 'ROLE_SUPER_ADMIN') {
         return new Response(
@@ -467,11 +507,12 @@ serve(async (req: Request) => {
         company_id: targetProf.company_id,
         user_id: callerUser.id,
         event_type: 'ROLE_CHANGED',
-        metadata: { target_user_id: targetUserId, old_role: targetProf.role, new_role: newRole },
+        ip_address: req.headers.get('x-forwarded-for') || null,
+        metadata: { target_user_id: targetUserId, old_role: targetProf.role, new_role: newRole, correlation_id: correlationId },
       });
 
       return new Response(
-        JSON.stringify({ success: true, role: newRole }),
+        JSON.stringify({ success: true, correlationId, role: newRole }),
         { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
@@ -482,7 +523,7 @@ serve(async (req: Request) => {
     );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Erro interno.';
-    console.error('[ERRO admin-manage-user]:', msg);
+    console.error(`[CID:${correlationId}] [ERRO admin-manage-user]:`, msg);
     return new Response(
       JSON.stringify({ success: false, error: 'Erro ao processar solicitação administrativa.' }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }

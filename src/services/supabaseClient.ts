@@ -17,19 +17,6 @@ if (!supabaseUrl || !supabasePublishableKey) {
   }
 }
 
-// Instância padrão do Supabase Client
-export const supabase: SupabaseClient = createClient(
-  supabaseUrl || 'https://placeholder-unconfigured.supabase.co',
-  supabasePublishableKey || 'placeholder-publishable-key',
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  }
-);
-
 let supabaseInstance: SupabaseClient | null = null;
 let currentConfig: SupabaseConfig | null = null;
 
@@ -83,6 +70,9 @@ export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient {
 
   return supabaseInstance;
 }
+
+// Instância padrão compartilhada do Supabase Client
+export const supabase: SupabaseClient = getSupabaseClient();
 
 export async function testSupabaseConnection(config: SupabaseConfig): Promise<{ success: boolean; message: string }> {
   try {

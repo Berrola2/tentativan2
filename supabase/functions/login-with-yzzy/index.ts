@@ -63,7 +63,7 @@ serve(async (req: Request) => {
   }
 
   const correlationId = crypto.randomUUID();
-  const AUTH_FUNCTION_VERSION = '2026-09-09-v3-autoheal';
+  const AUTH_FUNCTION_VERSION = '2026-09-09-v4-identity-fixed';
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -168,43 +168,57 @@ serve(async (req: Request) => {
       );
     }
 
-    // 4. Resolução da Identidade Interna (Login YZZY -> auth_email real de auth.users)
+    // 4. Resolução da Identidade Interna (Login YZZY -> auth_email real de auth.users via RPC READ-ONLY)
     console.log(`[CID:${correlationId}] [IDENTITY_RESOLUTION_STARTED] Alias: ${cleanLogin}`);
-    let internalAuthEmail = cleanLogin;
-    let identityUser: Record<string, any> | null = null;
 
-    // 4.1 Resolução via RPC segura resolve_login_yzzy_identity com auto-healing
     const { data: rpcRows, error: rpcErr } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
       p_login_alias: cleanLogin,
     });
 
-    if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
-      identityUser = rpcRows[0];
-      internalAuthEmail = identityUser.auth_email;
-      console.log(`[CID:${correlationId}] [IDENTITY_FOUND] UserId: ${identityUser.user_id} | Role: ${identityUser.role} | EmailConfirmed: ${identityUser.email_confirmed}`);
-    } else {
-      console.warn(`[CID:${correlationId}] [IDENTITY_NOT_FOUND_RPC] Erro/Vazio: ${rpcErr?.message || 'Nenhum registro'}`);
-      
-      // 4.2 Fallback direto na tabela private.user_auth_identities
-      const { data: directIdentity } = await supabaseAdmin
-        .schema('private')
-        .from('user_auth_identities')
-        .select('user_id, company_id, auth_email')
-        .eq('login_alias', cleanLogin)
-        .maybeSingle();
+    if (rpcErr || !Array.isArray(rpcRows) || rpcRows.length === 0) {
+      console.warn(`[CID:${correlationId}] [IDENTITY_NOT_FOUND] Alias não cadastrado em private.user_auth_identities. Erro RPC: ${rpcErr?.message || 'Nenhum registro encontrado.'}`);
 
-      if (directIdentity && directIdentity.auth_email) {
-        internalAuthEmail = directIdentity.auth_email;
-        console.log(`[CID:${correlationId}] [IDENTITY_FOUND_DIRECT] Email: ${internalAuthEmail.split('@')[0]}***@...`);
-      } else {
-        console.warn(`[CID:${correlationId}] [IDENTITY_NOT_FOUND_DIRECT] Alias não cadastrado.`);
-      }
+      // Registrar falha de auditoria sem expor detalhes internos
+      await supabaseAdmin.from('security_audit_logs').insert({
+        company_id: null,
+        event_type: 'LOGIN_FAILED',
+        ip_address: clientIp,
+        metadata: { login_attempt: cleanLogin, correlation_id: correlationId, reason: 'identity_not_found' },
+      });
+
+      // NÃO realizar fallback para o alias literal — abortar imediatamente com erro seguro
+      return new Response(
+        JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
     }
 
-    console.log(`[CID:${correlationId}] [SIGN_IN_STARTED] Email de destino: ${internalAuthEmail.split('@')[0]}***@${internalAuthEmail.split('@')[1] || ''}`);
+    const identityUser = rpcRows[0];
+    const internalAuthEmail = identityUser.auth_email;
+    const userId = identityUser.user_id;
 
-    // 5. Autenticação no Supabase Auth
-    // Usar cliente com anonKey para grant_type=password
+    console.log(`[CID:${correlationId}] [IDENTITY_FOUND] UserId: ${userId} | Role: ${identityUser.role} | Active: ${identityUser.active} | MustChangePass: ${identityUser.must_change_password} | AuthEmail: ${internalAuthEmail.split('@')[0]}***@${internalAuthEmail.split('@')[1] || ''}`);
+
+    // 5. Validar se o usuário e a empresa estão ativos
+    if (!identityUser.active) {
+      console.warn(`[CID:${correlationId}] [USER_INACTIVE] Usuário ${userId} está desativado.`);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (identityUser.company_id && !identityUser.company_active) {
+      console.warn(`[CID:${correlationId}] [COMPANY_INACTIVE] Empresa ${identityUser.company_id} está inativa.`);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
+        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 6. Autenticação no Supabase Auth usando o email interno real
+    console.log(`[CID:${correlationId}] [SIGN_IN_STARTED] Autenticando no Supabase Auth com email: ${internalAuthEmail.split('@')[0]}***@...`);
+
     const authClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -216,12 +230,11 @@ serve(async (req: Request) => {
 
     if (authErr || !authData?.user || !authData?.session) {
       const errStatus = (authErr as any)?.status || 401;
-      const errCode = (authErr as any)?.code || authErr?.name || 'invalid_grant';
+      const errCode = (authErr as any)?.code || authErr?.name || 'invalid_credentials';
       console.warn(`[CID:${correlationId}] [SIGN_IN_FAILURE] Motivo: ${authErr?.message || 'Sessão nula'} | Código: ${errCode} | Status: ${errStatus}`);
 
-      // Registrar falha de auditoria (sem atribuir company_id não autenticado)
       await supabaseAdmin.from('security_audit_logs').insert({
-        company_id: null,
+        company_id: identityUser.company_id,
         event_type: 'LOGIN_FAILED',
         ip_address: clientIp,
         metadata: { login_attempt: cleanLogin, correlation_id: correlationId, error_code: errCode },
@@ -233,44 +246,7 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log(`[CID:${correlationId}] [SIGN_IN_SUCCESS] Usuário autenticado com sucesso no Supabase Auth. AuthUserId: ${authData.user.id}`);
-
-    const userId = authData.user.id;
-
-    // 6. Validar se o perfil e a empresa estão ativos no banco
-    const { data: profileData, error: profErr } = await supabaseAdmin
-      .from('profiles')
-      .select('id, company_id, username, full_name, display_name, role, active, must_change_password')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profErr || !profileData || !profileData.active) {
-      console.warn(`[CID:${correlationId}] [PROFILE_NOT_FOUND_OR_INACTIVE] Perfil inválido para userId: ${userId}`);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
-        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log(`[CID:${correlationId}] [PROFILE_FOUND] Role: ${profileData.role} | must_change_password: ${profileData.must_change_password}`);
-
-    let companyData: { id: string; name: string; slug: string; active: boolean } | null = null;
-    if (profileData.company_id) {
-      const { data: comp } = await supabaseAdmin
-        .from('companies')
-        .select('id, name, slug, active')
-        .eq('id', profileData.company_id)
-        .maybeSingle();
-
-      if (!comp || !comp.active) {
-        console.warn(`[CID:${correlationId}] [COMPANY_INACTIVE] Empresa inativa para company_id: ${profileData.company_id}`);
-        return new Response(
-          JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
-          { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
-        );
-      }
-      companyData = comp;
-    }
+    console.log(`[CID:${correlationId}] [SIGN_IN_SUCCESS] Autenticação confirmada no Supabase Auth. AuthUserId: ${authData.user.id}`);
 
     // 7. Reset dos Contadores de Rate Limit após Sucesso
     await Promise.allSettled([
@@ -281,10 +257,10 @@ serve(async (req: Request) => {
     // 8. Registrar auditoria de sucesso
     await supabaseAdmin.from('security_audit_logs').insert({
       user_id: userId,
-      company_id: profileData.company_id,
+      company_id: identityUser.company_id,
       event_type: 'LOGIN_SUCCESS',
       ip_address: clientIp,
-      metadata: { role: profileData.role, login: cleanLogin, correlation_id: correlationId },
+      metadata: { role: identityUser.role, login: cleanLogin, correlation_id: correlationId },
     });
 
     const responsePayload = {
@@ -298,21 +274,21 @@ serve(async (req: Request) => {
         token_type: authData.session.token_type,
       },
       user: {
-        id: profileData.id,
-        username: profileData.username,
-        fullName: profileData.full_name,
-        displayName: profileData.display_name || profileData.full_name,
-        role: profileData.role,
-        active: profileData.active,
-        mustChangePassword: profileData.must_change_password,
-        companyId: profileData.company_id || null,
-        companyName: companyData?.name || null,
-        companySlug: companyData?.slug || null,
+        id: identityUser.user_id,
+        username: identityUser.username,
+        fullName: identityUser.full_name,
+        displayName: identityUser.display_name,
+        role: identityUser.role,
+        active: identityUser.active,
+        mustChangePassword: identityUser.must_change_password,
+        companyId: identityUser.company_id || null,
+        companyName: identityUser.company_name || null,
+        companySlug: identityUser.company_slug || null,
         loginAlias: cleanLogin,
       },
     };
 
-    console.log(`[CID:${correlationId}] [AUTH_COMPLETED_SUCCESS] Resposta 200 enviada ao cliente.`);
+    console.log(`[CID:${correlationId}] [AUTH_COMPLETED_SUCCESS] Resposta HTTP 200 emitida com sucesso.`);
 
     return new Response(
       JSON.stringify(responsePayload),

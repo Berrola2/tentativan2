@@ -8,11 +8,11 @@ import type {
   AuthSession, 
   AuthUser, 
   Company, 
-  UserProfile,
-  CreateCompanyPayload,
-  CreateEmployeePayload,
-  AuthActionResult,
-  UserRole
+  UserProfile, 
+  CreateCompanyPayload, 
+  CreateEmployeePayload, 
+  AuthActionResult, 
+  UserRole 
 } from '../types/auth';
 
 /**
@@ -140,8 +140,16 @@ export async function logoutUser(): Promise<void> {
 export async function changeUserPassword(newPassword: string): Promise<AuthActionResult> {
   const client = getSupabaseClient();
   try {
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !session?.access_token) {
+      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
     const { data, error } = await client.functions.invoke('change-password', {
       body: { newPassword },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
     });
 
     if (error || !data?.success) {
@@ -226,12 +234,29 @@ export async function fetchCurrentUserData(userId: string): Promise<AuthUser | n
 export async function adminCreateCompany(payload: CreateCompanyPayload): Promise<AuthActionResult<{ company: Company; manager?: { loginAlias: string; tempPassword: string; fullName: string } }>> {
   const client = getSupabaseClient();
   try {
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !session?.access_token) {
+      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
     const { data, error } = await client.functions.invoke('admin-manage-user', {
       body: { action: 'create_company', ...payload },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
     });
 
     if (error || !data?.success) {
-      return { success: false, error: data?.error || error?.message || 'Falha ao cadastrar empresa.' };
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
+      return { success: false, error: serverError || data?.error || error?.message || 'Falha ao cadastrar empresa.' };
     }
 
     return { success: true, data };
@@ -247,12 +272,29 @@ export async function adminCreateCompany(payload: CreateCompanyPayload): Promise
 export async function adminCreateEmployee(payload: CreateEmployeePayload): Promise<AuthActionResult<{ loginAlias: string; tempPassword: string; user: { id: string; fullName: string; role: UserRole } }>> {
   const client = getSupabaseClient();
   try {
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !session?.access_token) {
+      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
     const { data, error } = await client.functions.invoke('admin-manage-user', {
       body: { action: 'create_employee', ...payload },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
     });
 
     if (error || !data?.success) {
-      return { success: false, error: data?.error || error?.message || 'Falha ao cadastrar funcionário.' };
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
+      return { success: false, error: serverError || data?.error || error?.message || 'Falha ao cadastrar funcionário.' };
     }
 
     return { success: true, data };
@@ -268,12 +310,29 @@ export async function adminCreateEmployee(payload: CreateEmployeePayload): Promi
 export async function adminToggleUserStatus(targetUserId: string, active: boolean): Promise<AuthActionResult> {
   const client = getSupabaseClient();
   try {
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !session?.access_token) {
+      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
     const { data, error } = await client.functions.invoke('admin-manage-user', {
       body: { action: 'toggle_user_status', targetUserId, active },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
     });
 
     if (error || !data?.success) {
-      return { success: false, error: data?.error || error?.message || 'Falha ao alterar status do funcionário.' };
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
+      return { success: false, error: serverError || data?.error || error?.message || 'Falha ao alterar status do funcionário.' };
     }
 
     return { success: true };
@@ -289,12 +348,29 @@ export async function adminToggleUserStatus(targetUserId: string, active: boolea
 export async function adminChangeUserRole(targetUserId: string, newRole: UserRole): Promise<AuthActionResult> {
   const client = getSupabaseClient();
   try {
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !session?.access_token) {
+      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
     const { data, error } = await client.functions.invoke('admin-manage-user', {
       body: { action: 'change_user_role', targetUserId, newRole },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
     });
 
     if (error || !data?.success) {
-      return { success: false, error: data?.error || error?.message || 'Falha ao alterar cargo do funcionário.' };
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
+      return { success: false, error: serverError || data?.error || error?.message || 'Falha ao alterar cargo do funcionário.' };
     }
 
     return { success: true };
