@@ -8,11 +8,31 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.112.4';
 
+const ALLOWED_ORIGINS = new Set([
+  'https://vistoriayzzy.vercel.app',
+  'https://tentativan2.vercel.app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+]);
+
 function getCorsHeaders(requestOrigin: string | null): Record<string, string> {
+  let allowedOrigin = 'https://vistoriayzzy.vercel.app';
+  if (requestOrigin) {
+    if (
+      ALLOWED_ORIGINS.has(requestOrigin) ||
+      /^https:\/\/vistoriayzzy(-[a-z0-9-]+)?\.vercel\.app$/.test(requestOrigin) ||
+      /^https:\/\/tentativan2(-[a-z0-9-]+)?\.vercel\.app$/.test(requestOrigin)
+    ) {
+      allowedOrigin = requestOrigin;
+    }
+  }
+
   return {
-    'Access-Control-Allow-Origin': requestOrigin || '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Origin': allowedOrigin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-version, x-requested-with, accept, origin, pragma, cache-control',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
   };
@@ -140,17 +160,17 @@ serve(async (req: Request) => {
       );
     }
 
-    // 4. Resolução da Identidade Interna (Login YZZY -> auth_email)
+    // 4. Resolução da Identidade Interna (Login YZZY -> auth_email na tabela private.user_auth_identities)
     let internalAuthEmail = cleanLogin;
 
-    // Buscar no mapeamento privado
     const { data: identityData } = await supabaseAdmin
+      .schema('private')
       .from('user_auth_identities')
       .select('user_id, company_id, auth_email')
       .eq('login_alias', cleanLogin)
       .maybeSingle();
 
-    if (identityData) {
+    if (identityData && identityData.auth_email) {
       internalAuthEmail = identityData.auth_email;
     }
 

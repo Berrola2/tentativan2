@@ -87,10 +87,10 @@ class NetworkStateManager {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
 
-      // Ping leve ao endpoint público do Supabase
+      // Ping leve ao endpoint público de saúde do Supabase
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://wyyigrlqxwjxjqkazeof.supabase.co';
-      const response = await fetch(`${supabaseUrl}/rest/v1/`, {
-        method: 'HEAD',
+      const response = await fetch(`${supabaseUrl}/auth/v1/health`, {
+        method: 'GET',
         mode: 'cors',
         signal: controller.signal,
         headers: {
