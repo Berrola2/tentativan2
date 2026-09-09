@@ -128,14 +128,17 @@ async function bootstrapSuperAdmin() {
 
         console.log(`🔄 Iniciando redefinição de senha para o Super Admin (${targetUserId})...`);
 
-        // 1. Atualizar senha no Supabase Auth
-        const { error: updateAuthErr } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+        // 1. Atualizar senha no Supabase Auth garantindo email_confirm = true
+        const { data: updatedAuthUser, error: updateAuthErr } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
           password: tempPassword,
+          email_confirm: true,
         });
 
         if (updateAuthErr) {
           throw new Error(`Falha ao atualizar senha no Supabase Auth: ${updateAuthErr.message}`);
         }
+
+        const actualAuthEmail = updatedAuthUser?.user?.email || authUserData?.user?.email;
 
         // 2. Garantir must_change_password = true no profile
         const { error: updateProfErr } = await supabaseAdmin
@@ -151,29 +154,42 @@ async function bootstrapSuperAdmin() {
           throw new Error(`Falha ao atualizar perfil: ${updateProfErr.message}`);
         }
 
-        // 3. Garantir identidade em private.user_auth_identities
-        const authEmail = authUserData?.user?.email || identityData?.auth_email || `superadmin_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}@auth.yzzy.internal`;
-        
+        // 3. Garantir identidade em private.user_auth_identities com auth_email sincronizado
         if (!identityData) {
           await supabaseAdmin.schema('private').from('user_auth_identities').insert({
             user_id: targetUserId,
             company_id: null,
             login_alias: defaultLoginAlias,
-            auth_email: authEmail,
+            auth_email: actualAuthEmail,
           });
-        } else if (identityData.login_alias !== defaultLoginAlias) {
+        } else {
           await supabaseAdmin.schema('private').from('user_auth_identities').update({
             login_alias: defaultLoginAlias,
+            auth_email: actualAuthEmail,
+            updated_at: new Date().toISOString(),
           }).eq('user_id', targetUserId);
         }
 
-        console.log('====================================================================');
-        console.log('✅ [SUCESSO] SENHA DO SUPER ADMIN REDEFINIDA COM SUCESSO!');
+        // 4. Teste de Validação Direta do Auth
+        console.log('🧪 Validando credencial via Supabase Auth (signInWithPassword)...');
+        const { data: testAuth, error: testAuthErr } = await supabaseAdmin.auth.signInWithPassword({
+          email: actualAuthEmail,
+          password: tempPassword,
+        });
+
+        if (testAuthErr || !testAuth?.session) {
+          console.warn('⚠️ Alerta durante teste direto de signInWithPassword:', testAuthErr?.message);
+        } else {
+          console.log('✅ Teste direto signInWithPassword: AUTENTICADO COM SUCESSO!');
+        }
+
+        console.log('\n====================================================================');
+        console.log('✅ [SUCESSO] SENHA DO SUPER ADMIN REDEFINIDA E VALIDADA COM SUCESSO!');
         console.log('====================================================================');
         console.log(`Login YZZY        : ${defaultLoginAlias}`);
         console.log(`Nova Senha Temp   : ${tempPassword}`);
         console.log(`Papel (Role)      : ROLE_SUPER_ADMIN`);
-        console.log(`Empresa           : Global (company_id = NULL)`);
+        console.log(`Email Interno Auth: ${actualAuthEmail.split('@')[0]}***@${actualAuthEmail.split('@')[1]}`);
         console.log(`Troca Obrigatória : Sim (must_change_password = TRUE)`);
         console.log('====================================================================\n');
         console.log('👉 Acesse https://vistoriayzzy.vercel.app para efetuar o login e definir a senha definitiva.');

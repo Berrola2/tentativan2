@@ -160,19 +160,33 @@ serve(async (req: Request) => {
       );
     }
 
-    // 4. Resolução da Identidade Interna (Login YZZY -> auth_email na tabela private.user_auth_identities)
+    // 4. Resolução da Identidade Interna (Login YZZY -> auth_email real de auth.users)
     let internalAuthEmail = cleanLogin;
+    let identityUser: Record<string, any> | null = null;
 
-    const { data: identityData } = await supabaseAdmin
-      .schema('private')
-      .from('user_auth_identities')
-      .select('user_id, company_id, auth_email')
-      .eq('login_alias', cleanLogin)
-      .maybeSingle();
+    // 4.1 Tentar resolução via RPC segura com junção atômica em auth.users
+    const { data: rpcRows, error: rpcErr } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
+      p_login_alias: cleanLogin,
+    });
 
-    if (identityData && identityData.auth_email) {
-      internalAuthEmail = identityData.auth_email;
+    if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
+      identityUser = rpcRows[0];
+      internalAuthEmail = identityUser.auth_email;
+    } else {
+      // 4.2 Fallback direto na tabela private.user_auth_identities
+      const { data: directIdentity } = await supabaseAdmin
+        .schema('private')
+        .from('user_auth_identities')
+        .select('user_id, company_id, auth_email')
+        .eq('login_alias', cleanLogin)
+        .maybeSingle();
+
+      if (directIdentity && directIdentity.auth_email) {
+        internalAuthEmail = directIdentity.auth_email;
+      }
     }
+
+    console.log(`[login-with-yzzy] Processando login para alias: ${cleanLogin} -> auth_email: ${internalAuthEmail.split('@')[0]}***@${internalAuthEmail.split('@')[1] || ''}`);
 
     // 5. Autenticação no Supabase Auth
     const { data: authData, error: authErr } = await supabaseAdmin.auth.signInWithPassword({
@@ -181,12 +195,14 @@ serve(async (req: Request) => {
     });
 
     if (authErr || !authData?.user || !authData?.session) {
+      console.warn(`[login-with-yzzy] Falha de autenticação Supabase Auth: ${authErr?.message || 'Sessão nula'} (Código/Status: ${(authErr as any)?.status || (authErr as any)?.code || 'auth_failed'})`);
+
       // Registrar falha de auditoria (sem atribuir company_id não autenticado)
       await supabaseAdmin.from('security_audit_logs').insert({
         company_id: null,
         event_type: 'LOGIN_FAILED',
         ip_address: clientIp,
-        metadata: { login_attempt: cleanLogin },
+        metadata: { login_attempt: cleanLogin, error_code: (authErr as any)?.code || authErr?.name },
       });
 
       return new Response(
@@ -205,6 +221,7 @@ serve(async (req: Request) => {
       .maybeSingle();
 
     if (profErr || !profileData || !profileData.active) {
+      console.warn(`[login-with-yzzy] Perfil não encontrado ou inativo para userId: ${userId}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -220,6 +237,7 @@ serve(async (req: Request) => {
         .maybeSingle();
 
       if (!comp || !comp.active) {
+        console.warn(`[login-with-yzzy] Empresa inativa para company_id: ${profileData.company_id}`);
         return new Response(
           JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
           { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
