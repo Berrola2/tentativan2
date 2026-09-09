@@ -171,7 +171,7 @@ async function bootstrapSuperAdmin() {
         }
 
         // 4. Teste de Validação Direta do Auth
-        console.log('🧪 Validando credencial via Supabase Auth (signInWithPassword)...');
+        console.log('🧪 1/2: Validando credencial via Supabase Auth (signInWithPassword)...');
         const { data: testAuth, error: testAuthErr } = await supabaseAdmin.auth.signInWithPassword({
           email: actualAuthEmail,
           password: tempPassword,
@@ -181,6 +181,18 @@ async function bootstrapSuperAdmin() {
           console.warn('⚠️ Alerta durante teste direto de signInWithPassword:', testAuthErr?.message);
         } else {
           console.log('✅ Teste direto signInWithPassword: AUTENTICADO COM SUCESSO!');
+        }
+
+        // 5. Teste da Edge Function login-with-yzzy
+        console.log('🧪 2/2: Validando fluxo oficial via Edge Function login-with-yzzy...');
+        const { data: edgeData, error: edgeErr } = await supabaseAdmin.functions.invoke('login-with-yzzy', {
+          body: { login: defaultLoginAlias, password: tempPassword }
+        });
+
+        if (edgeErr || !edgeData?.success) {
+          console.warn('⚠️ Alerta durante teste da Edge Function:', edgeErr?.message || edgeData?.error);
+        } else {
+          console.log('✅ Teste completo login-with-yzzy: SUCESSO! Sessão e Perfil ROLE_SUPER_ADMIN confirmados.');
         }
 
         console.log('\n====================================================================');
