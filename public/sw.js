@@ -38,7 +38,8 @@ self.addEventListener('activate', (event) => {
 });
 
 // 3. FETCH STRATEGY:
-// - Assets estáticos (JS, CSS, Imagens da UI, Fontes): Cache First / Stale While Revalidate
+// - Navegação (HTML/Document): Network First com fallback para cache offline (evita travar em versões antigas)
+// - Assets com hash (JS, CSS, Imagens da UI): Cache First com atualização em background
 // - APIs e Supabase: Network First (Dados de vistoria e mídias privadas são geridos pelo IndexedDB)
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -49,7 +50,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Não cachear chamadas Supabase/API pelo Service Worker (IndexedDB gerencia dados offline autenticados)
+  // Não interceptar chamadas Supabase/API pelo Service Worker (IndexedDB gerencia dados offline autenticados)
   if (url.hostname.includes('supabase.co') || url.pathname.startsWith('/rest/') || url.pathname.startsWith('/auth/')) {
     event.respondWith(
       fetch(request).catch(() => {
@@ -62,32 +63,47 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App Shell & Assets Estáticos: Cache First com fallback de rede
+  // 3.1 NAVEGAÇÃO / HTML: Network-First (Garante que novos deploys apareçam imediatamente quando online)
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => {
+          // Se estiver offline ou sem rede, entrega o App Shell do cache
+          return caches.match('/index.html') || caches.match('/') || new Response('Vistoria YZZY Offline', { status: 503 });
+        })
+    );
+    return;
+  }
+
+  // 3.2 ASSETS ESTÁTICOS (JS, CSS, Imagens, Fontes): Cache First com atualização em background
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Atualizar cache em segundo plano (Stale While Revalidate)
         fetch(request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, networkResponse));
           }
-        }).catch(() => {
-          // Erro de rede em background ignorado silenciosamente
-        });
+        }).catch(() => {});
         return cachedResponse;
       }
 
-      // Se não estiver no cache, buscar na rede e cachear se for asset estático
       return fetch(request).then((response) => {
         if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
         }
 
-        const isStaticAsset = request.destination === 'style' ||
-                              request.destination === 'script' ||
-                              request.destination === 'image' ||
-                              request.destination === 'font' ||
-                              url.pathname === '/';
+        const isStaticAsset =
+          request.destination === 'style' ||
+          request.destination === 'script' ||
+          request.destination === 'image' ||
+          request.destination === 'font';
 
         if (isStaticAsset) {
           const responseToCache = response.clone();
@@ -98,10 +114,6 @@ self.addEventListener('fetch', (event) => {
 
         return response;
       }).catch(() => {
-        // Se a navegação falhar completamente (ex: SPA reload offline), retornar index.html do cache
-        if (request.mode === 'navigate') {
-          return caches.match('/index.html') || caches.match('/');
-        }
         return new Response('Sem conexão', { status: 503, statusText: 'Offline' });
       });
     })
