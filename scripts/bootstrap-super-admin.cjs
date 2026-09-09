@@ -52,16 +52,21 @@ function generateSecureTempPassword() {
 }
 
 async function bootstrapSuperAdmin() {
+  const isResetMode = process.argv.includes('--reset-password') || process.argv.includes('--reset');
+  const isAuditMode = process.argv.includes('--audit') || process.argv.includes('--check');
+  const customPasswordArg = process.argv.find(arg => !arg.startsWith('--') && arg !== process.argv[0] && arg !== process.argv[1]);
+
   console.log('====================================================================');
-  console.log('🚀 VISTORIA YZZY — BOOTSTRAP DO PRIMEIRO SUPER ADMIN');
+  console.log('🚀 VISTORIA YZZY — GESTÃO & BOOTSTRAP DO SUPER ADMIN');
   console.log('Endpoint:', supabaseUrl);
+  console.log('Modo    :', isResetMode ? 'REDEFINIÇÃO DE SENHA (--reset-password)' : isAuditMode ? 'AUDITORIA (--audit)' : 'PROVISIONAMENTO / VERIFICAÇÃO');
   console.log('====================================================================\n');
 
   if (!secretKey) {
     console.error('[ERRO] Chave de administração do Supabase não configurada na sessão.');
     console.log('\nComo executar no PowerShell:');
     console.log('  $env:SUPABASE_SECRET_KEY="sua_secret_key_aqui"');
-    console.log('  node scripts/bootstrap-super-admin.cjs [senha_temporaria_opcional]');
+    console.log('  node scripts/bootstrap-super-admin.cjs --reset-password [senha_temporaria_opcional]');
     console.log('  Remove-Item Env:SUPABASE_SECRET_KEY\n');
     process.exit(1);
   }
@@ -70,36 +75,124 @@ async function bootstrapSuperAdmin() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const tempPassword = process.argv[2] || generateSecureTempPassword();
-  const loginAlias = 'admin@yzzy.yzzy';
+  const defaultLoginAlias = 'admin@yzzy.yzzy';
   const username = 'superadmin';
   const fullName = 'Super Administrador YZZY';
-  const internalAuthEmail = `superadmin_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}@auth.yzzy.internal`;
-
-  let createdAuthUserId = null;
-  let createdProfile = false;
 
   try {
-    // 1. Verificar se já existe algum SUPER_ADMIN cadastrado
+    // 1. Auditar se já existe SUPER_ADMIN cadastrado em public.profiles
     const { data: existingSuperAdmins, error: saCheckErr } = await supabaseAdmin
       .from('profiles')
-      .select('id, username, full_name, role, active, must_change_password')
+      .select('id, username, full_name, role, active, must_change_password, company_id')
       .eq('role', 'ROLE_SUPER_ADMIN');
 
     if (saCheckErr) {
-      throw new Error(`Falha ao auditar perfis: ${saCheckErr.message}`);
+      throw new Error(`Falha ao consultar public.profiles: ${saCheckErr.message}`);
     }
 
+    // Se já existe Super Admin
     if (existingSuperAdmins && existingSuperAdmins.length > 0) {
-      console.log('⚠️ [AVISO] Já existe Super Admin cadastrado na base de dados:');
-      existingSuperAdmins.forEach(sa => {
-        console.log(`   - ID: ${sa.id} | Usuário: ${sa.username} | Nome: ${sa.full_name} | Ativo: ${sa.active}`);
-      });
-      console.log('\nNenhum novo Super Admin foi criado para preservar a segurança da base.\n');
+      const superAdmin = existingSuperAdmins[0];
+      const targetUserId = superAdmin.id;
+
+      // Auditar vínculo em private.user_auth_identities
+      const { data: identityData, error: idErr } = await supabaseAdmin
+        .schema('private')
+        .from('user_auth_identities')
+        .select('id, user_id, company_id, login_alias, auth_email')
+        .eq('user_id', targetUserId)
+        .maybeSingle();
+
+      // Auditar vínculo em auth.users
+      const { data: authUserData, error: authUserErr } = await supabaseAdmin.auth.admin.getUserById(targetUserId);
+
+      console.log('📊 [AUDITORIA DO SUPER ADMIN EXISTENTE]');
+      console.log(`   - Auth User ID       : ${targetUserId}`);
+      console.log(`   - Profile ID         : ${superAdmin.id} (${superAdmin.full_name})`);
+      console.log(`   - Role               : ${superAdmin.role}`);
+      console.log(`   - Company ID         : ${superAdmin.company_id || 'NULL (Global)'}`);
+      console.log(`   - Ativo              : ${superAdmin.active}`);
+      console.log(`   - Must Change Pass   : ${superAdmin.must_change_password}`);
+      console.log(`   - Email Interno Auth : ${authUserData?.user?.email || identityData?.auth_email || 'Não encontrado'}`);
+      console.log(`   - Alias Login YZZY   : ${identityData?.login_alias || defaultLoginAlias}`);
+      console.log(`   - Integridade Vínculo: ${targetUserId === authUserData?.user?.id && targetUserId === identityData?.user_id ? '✅ 100% ÍNTEGRO' : '⚠️ Vínculo parcial'}\n`);
+
+      if (isAuditMode) {
+        console.log('Auditoria concluída com sucesso.');
+        return;
+      }
+
+      // Se solicitado reset ou provisionamento com usuário já existente
+      if (isResetMode || customPasswordArg) {
+        const tempPassword = customPasswordArg || generateSecureTempPassword();
+
+        console.log(`🔄 Iniciando redefinição de senha para o Super Admin (${targetUserId})...`);
+
+        // 1. Atualizar senha no Supabase Auth
+        const { error: updateAuthErr } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+          password: tempPassword,
+        });
+
+        if (updateAuthErr) {
+          throw new Error(`Falha ao atualizar senha no Supabase Auth: ${updateAuthErr.message}`);
+        }
+
+        // 2. Garantir must_change_password = true no profile
+        const { error: updateProfErr } = await supabaseAdmin
+          .from('profiles')
+          .update({
+            must_change_password: true,
+            active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', targetUserId);
+
+        if (updateProfErr) {
+          throw new Error(`Falha ao atualizar perfil: ${updateProfErr.message}`);
+        }
+
+        // 3. Garantir identidade em private.user_auth_identities
+        const authEmail = authUserData?.user?.email || identityData?.auth_email || `superadmin_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}@auth.yzzy.internal`;
+        
+        if (!identityData) {
+          await supabaseAdmin.schema('private').from('user_auth_identities').insert({
+            user_id: targetUserId,
+            company_id: null,
+            login_alias: defaultLoginAlias,
+            auth_email: authEmail,
+          });
+        } else if (identityData.login_alias !== defaultLoginAlias) {
+          await supabaseAdmin.schema('private').from('user_auth_identities').update({
+            login_alias: defaultLoginAlias,
+          }).eq('user_id', targetUserId);
+        }
+
+        console.log('====================================================================');
+        console.log('✅ [SUCESSO] SENHA DO SUPER ADMIN REDEFINIDA COM SUCESSO!');
+        console.log('====================================================================');
+        console.log(`Login YZZY        : ${defaultLoginAlias}`);
+        console.log(`Nova Senha Temp   : ${tempPassword}`);
+        console.log(`Papel (Role)      : ROLE_SUPER_ADMIN`);
+        console.log(`Empresa           : Global (company_id = NULL)`);
+        console.log(`Troca Obrigatória : Sim (must_change_password = TRUE)`);
+        console.log('====================================================================\n');
+        console.log('👉 Acesse https://vistoriayzzy.vercel.app para efetuar o login e definir a senha definitiva.');
+        return;
+      }
+
+      console.log('💡 Dica: Para redefinir a senha do Super Admin existente de forma segura, execute:');
+      console.log('   node scripts/bootstrap-super-admin.cjs --reset-password [nova_senha_opcional]\n');
       return;
     }
 
+    // Caso NÃO exista Super Admin, executa provisionamento do primeiro Super Admin
     console.log('Auditoria confirmada: Nenhum Super Admin existente. Iniciando provisionamento seguro...');
+
+    const tempPassword = customPasswordArg || generateSecureTempPassword();
+    const internalAuthEmail = `superadmin_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}@auth.yzzy.internal`;
+
+    let createdAuthUserId = null;
+    let createdProfile = false;
 
     // 2. Criar usuário no Supabase Auth via Admin API
     const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
@@ -139,13 +232,13 @@ async function bootstrapSuperAdmin() {
       throw new Error(`Falha ao criar perfil em public.profiles: ${profileErr.message}`);
     }
     createdProfile = true;
-    console.log('[OK] 2/3: Perfil ROLE_SUPER_ADMIN criado em public.profiles (company_id: NULL, must_change_password: TRUE).');
+    console.log('[OK] 2/3: Perfil ROLE_SUPER_ADMIN criado em public.profiles.');
 
     // 4. Registrar identidade no schema private através da RPC administrativa segura
     const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc('admin_bootstrap_super_admin_identity', {
       p_user_id: createdAuthUserId,
       p_auth_email: internalAuthEmail,
-      p_login_alias: loginAlias,
+      p_login_alias: defaultLoginAlias,
     });
 
     if (rpcErr || !rpcResult?.success) {
@@ -157,7 +250,7 @@ async function bootstrapSuperAdmin() {
     console.log('\n====================================================================');
     console.log('✅ [SUCESSO] PRIMEIRO SUPER ADMIN PROVISIONADO COM SUCESSO!');
     console.log('====================================================================');
-    console.log(`Login YZZY        : ${loginAlias}`);
+    console.log(`Login YZZY        : ${defaultLoginAlias}`);
     console.log(`Senha Temporária  : ${tempPassword}`);
     console.log(`Papel (Role)      : ROLE_SUPER_ADMIN`);
     console.log(`Empresa           : Global (company_id = NULL)`);
@@ -165,24 +258,7 @@ async function bootstrapSuperAdmin() {
     console.log('====================================================================\n');
     console.log('👉 No primeiro login, você será direcionado para criar sua nova senha definitiva.');
   } catch (err) {
-    console.error('\n❌ [ERRO NO BOOTSTRAP]:', err.message);
-
-    // Rollback compensatório atômico caso falhe
-    if (createdProfile && createdAuthUserId) {
-      console.log('[ROLLBACK] Removendo perfil criado em public.profiles...');
-      await supabaseAdmin.from('profiles').delete().eq('id', createdAuthUserId).catch(() => {});
-    }
-
-    if (createdAuthUserId) {
-      console.log('[ROLLBACK] Removendo usuário Auth órfão...');
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(createdAuthUserId);
-        console.log('[ROLLBACK CONCLUÍDO] Estado parcial removido com sucesso.');
-      } catch (rErr) {
-        console.error('[ERRO NO ROLLBACK]:', rErr.message);
-      }
-    }
-
+    console.error('\n❌ [ERRO NO BOOTSTRAP/RESET]:', err.message);
     process.exit(1);
   }
 }
