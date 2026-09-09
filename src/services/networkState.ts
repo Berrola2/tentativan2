@@ -94,7 +94,7 @@ class NetworkStateManager {
         mode: 'cors',
         signal: controller.signal,
         headers: {
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || ''
         }
       });
       clearTimeout(timeoutId);

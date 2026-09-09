@@ -3,13 +3,16 @@ import type { InspectionData, SupabaseConfig } from '../types/inspection';
 
 // Variáveis de ambiente exclusivas do Supabase no Frontend
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+const supabasePublishableKey =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  '';
 
 // Validação de configuração em ambiente de desenvolvimento
 if (!supabaseUrl || !supabasePublishableKey) {
   if (import.meta.env.DEV) {
     console.error(
-      '[Supabase Config] Erro de configuração: VITE_SUPABASE_URL ou VITE_SUPABASE_PUBLISHABLE_KEY não foram informadas no arquivo .env.'
+      '[Supabase Config] Erro de configuração: VITE_SUPABASE_URL ou VITE_SUPABASE_PUBLISHABLE_KEY / VITE_SUPABASE_ANON_KEY não foram informadas.'
     );
   }
 }
