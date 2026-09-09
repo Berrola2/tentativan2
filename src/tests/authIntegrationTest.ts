@@ -4,7 +4,7 @@
 // Módulo de validação isolado para todos os cenários (A até J)
 // ==============================================================================
 
-import { loginWithUsername } from '../services/auth';
+import { loginWithYzzy } from '../services/auth';
 import { getSupabaseClient } from '../services/supabaseClient';
 
 export interface TestCaseResult {
@@ -24,9 +24,8 @@ export async function runFullAuthAuditSuite(): Promise<TestCaseResult[]> {
 
   // TESTE A: Empresa correta + usuário correto + senha errada
   try {
-    const res = await loginWithUsername({
-      companySlug: 'yzzy-teste',
-      username: 'teste',
+    const res = await loginWithYzzy({
+      login: 'teste@yzzy-teste.yzzy',
       password: 'senha_completamente_incorreta_123',
     });
     results.push({
@@ -48,9 +47,8 @@ export async function runFullAuthAuditSuite(): Promise<TestCaseResult[]> {
 
   // TESTE B: Empresa correta + usuário inexistente
   try {
-    const res = await loginWithUsername({
-      companySlug: 'yzzy-teste',
-      username: 'usuario_inexistente_xyz',
+    const res = await loginWithYzzy({
+      login: 'inexistente@yzzy-teste.yzzy',
       password: 'qualquer_senha',
     });
     results.push({
@@ -72,9 +70,8 @@ export async function runFullAuthAuditSuite(): Promise<TestCaseResult[]> {
 
   // TESTE C: Empresa inexistente
   try {
-    const res = await loginWithUsername({
-      companySlug: 'empresa-que-nao-existe-999',
-      username: 'qualquer_usuario',
+    const res = await loginWithYzzy({
+      login: 'usuario@empresa-que-nao-existe.yzzy',
       password: 'qualquer_senha',
     });
     results.push({

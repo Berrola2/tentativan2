@@ -2,7 +2,7 @@
 # CONFIGURAÇÃO DECLARATIVA DO SUPABASE CLI — VISTORIA YZZY
 # ==============================================================================
 
-project_id = "dgeczjzbohmveonqxxzv"
+project_id = "wyyigrlqxwjxjqkazeof"
 
 [api]
 enabled = true
@@ -18,6 +18,14 @@ additional_redirect_urls = ["https://*.vercel.app"]
 jwt_expiry = 3600
 enable_signup = false
 
-# Configuração da Edge Function pública de login (pré-autenticação)
-[functions.login-with-username]
+# Edge Function pública de Login YZZY (pré-autenticação)
+[functions.login-with-yzzy]
+verify_jwt = false
+
+# Edge Function administrativa para gestão de empresas e funcionários
+[functions.admin-manage-user]
+verify_jwt = false
+
+# Edge Function para alteração de senha
+[functions.change-password]
 verify_jwt = false

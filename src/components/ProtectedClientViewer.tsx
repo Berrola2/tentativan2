@@ -219,7 +219,7 @@ export const ProtectedClientViewer: React.FC<ProtectedClientViewerProps> = ({
                             {item.name}
                           </span>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColors[item.status] || 'bg-slate-100 text-slate-700'}`}>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColors[item.status || 'Bom'] || 'bg-slate-100 text-slate-700'}`}>
                           {item.status}
                         </span>
                       </div>

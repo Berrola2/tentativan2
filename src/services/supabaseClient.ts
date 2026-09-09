@@ -1,16 +1,39 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { InspectionData, SupabaseConfig } from '../types/inspection';
 
-const defaultEnvUrl = import.meta.env.VITE_SUPABASE_URL || 'https://dgeczjzbohmveonqxxzv.supabase.co';
-const defaultEnvAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_3S17TTx7Eh_2qSfPzzLw9w_l5ImSPKl';
+// Variáveis de ambiente exclusivas do Supabase no Frontend
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '';
+
+// Validação de configuração em ambiente de desenvolvimento
+if (!supabaseUrl || !supabasePublishableKey) {
+  if (import.meta.env.DEV) {
+    console.error(
+      '[Supabase Config] Erro de configuração: VITE_SUPABASE_URL ou VITE_SUPABASE_PUBLISHABLE_KEY não foram informadas no arquivo .env.'
+    );
+  }
+}
+
+// Instância padrão do Supabase Client
+export const supabase: SupabaseClient = createClient(
+  supabaseUrl || 'https://placeholder-unconfigured.supabase.co',
+  supabasePublishableKey || 'placeholder-publishable-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
 
 let supabaseInstance: SupabaseClient | null = null;
 let currentConfig: SupabaseConfig | null = null;
 
 export function getInitialSupabaseConfig(): SupabaseConfig {
   return {
-    url: defaultEnvUrl,
-    anonKey: defaultEnvAnonKey,
+    url: supabaseUrl,
+    anonKey: supabasePublishableKey,
     bucketName: 'inspection-photos',
     tableName: 'inspections',
     autoSync: true,
@@ -18,21 +41,33 @@ export function getInitialSupabaseConfig(): SupabaseConfig {
 }
 
 export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient {
-  const targetUrl = config?.url || defaultEnvUrl;
-  const targetKey = config?.anonKey || defaultEnvAnonKey;
+  const targetUrl = config?.url || supabaseUrl;
+  const targetKey = config?.anonKey || supabasePublishableKey;
+
+  if (!targetUrl || !targetKey) {
+    if (import.meta.env.DEV) {
+      console.error(
+        '[Supabase] Configuração incompleta: informe VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY no arquivo .env.'
+      );
+    }
+  }
 
   if (
     !supabaseInstance ||
     currentConfig?.url !== targetUrl ||
     currentConfig?.anonKey !== targetKey
   ) {
-    supabaseInstance = createClient(targetUrl, targetKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    });
+    supabaseInstance = createClient(
+      targetUrl || 'https://placeholder-unconfigured.supabase.co',
+      targetKey || 'placeholder-publishable-key',
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      }
+    );
 
     currentConfig = {
       url: targetUrl,
@@ -48,6 +83,10 @@ export function getSupabaseClient(config?: SupabaseConfig): SupabaseClient {
 
 export async function testSupabaseConnection(config: SupabaseConfig): Promise<{ success: boolean; message: string }> {
   try {
+    if (!config.url || !config.anonKey) {
+      return { success: false, message: 'URL e Chave Pública do Supabase são obrigatórias.' };
+    }
+
     const client = createClient(config.url, config.anonKey);
     const { error } = await client.from('companies').select('id', { count: 'exact', head: true });
     

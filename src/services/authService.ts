@@ -108,6 +108,7 @@ export async function fetchProfileAndCompany(userId: string): Promise<{ user: Au
       companySlug: company.slug,
       username: profile.username,
       fullName: profile.full_name,
+      displayName: profile.full_name,
       role: profile.role as UserRole,
       active: profile.active,
     };
@@ -271,6 +272,7 @@ export async function fetchCompanyUsers(companyId: string): Promise<AuthUser[]> 
       companySlug: '',
       username: u.username,
       fullName: u.full_name,
+      displayName: u.full_name,
       role: u.role as UserRole,
       active: u.active,
     }));
@@ -345,6 +347,7 @@ export async function createCompanyUser(
         companySlug: '',
         username: resp.user.username,
         fullName: resp.user.full_name,
+        displayName: resp.user.full_name,
         role: resp.user.role as UserRole,
         active: resp.user.active,
       },

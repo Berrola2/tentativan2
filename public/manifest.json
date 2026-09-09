@@ -1,17 +1,26 @@
 {
-  "short_name": "VistoriaPro",
-  "name": "VistoriaPro - Laudos Imobiliários",
+  "short_name": "YZZY",
+  "name": "Vistoria YZZY",
+  "description": "Vistoria YZZY - Sistema Profissional Offline-First para Vistorias e Laudos Imobiliários",
   "icons": [
     {
       "src": "/favicon.svg",
       "type": "image/svg+xml",
-      "sizes": "512x512"
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.jpg",
+      "type": "image/jpeg",
+      "sizes": "512x512",
+      "purpose": "any"
     }
   ],
   "start_url": "/",
   "background_color": "#0f172a",
-  "theme_color": "#0284c7",
+  "theme_color": "#2563eb",
   "display": "standalone",
-  "orientation": "portrait",
-  "scope": "/"
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "categories": ["business", "productivity", "utilities"]
 }

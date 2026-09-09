@@ -1,293 +1,159 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Building2, 
-  User, 
-  Lock, 
-  ArrowRight, 
-  ShieldCheck, 
-  Loader2, 
-  Eye, 
-  EyeOff,
-  CheckCircle2,
-  AlertCircle
-} from 'lucide-react';
-import { lookupCompany } from '../services/authService';
+import React, { useState } from 'react';
+import { Shield, Eye, EyeOff, LogIn, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import type { Company } from '../types/auth';
 
-interface LoginViewProps {
-  onSuccess?: () => void;
-}
-
-export const LoginView: React.FC<LoginViewProps> = ({ onSuccess }) => {
-  const { login } = useAuth();
-
-  const [companySlug, setCompanySlug] = useState('');
-  const [username, setUsername] = useState('');
+export const LoginView: React.FC = () => {
+  const { login, isLoading } = useAuth();
+  const [loginInput, setLoginInput] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSearchingCompany, setIsSearchingCompany] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [companyFeedback, setCompanyFeedback] = useState<{
-    company: Company | null;
-    error: string | null;
-  }>({
-    company: null,
-    error: null,
-  });
-
-  // Busca dinâmica e debounced da empresa pelo slug informado
-  useEffect(() => {
-    let isCurrent = true;
-    const clean = companySlug.trim().toLowerCase();
-
-    if (clean.length >= 3) {
-      setIsSearchingCompany(true);
-      const timer = setTimeout(async () => {
-        try {
-          const found = await lookupCompany(clean);
-          if (!isCurrent) return;
-
-          if (found) {
-            if (!found.active) {
-              setCompanyFeedback({
-                company: found,
-                error: 'Esta empresa está temporariamente indisponível.',
-              });
-            } else {
-              setCompanyFeedback({
-                company: found,
-                error: null,
-              });
-            }
-          } else {
-            setCompanyFeedback({
-              company: null,
-              error: 'Empresa não encontrada.',
-            });
-          }
-        } catch {
-          if (isCurrent) {
-            setCompanyFeedback({ company: null, error: null });
-          }
-        } finally {
-          if (isCurrent) {
-            setIsSearchingCompany(false);
-          }
-        }
-      }, 350);
-
-      return () => {
-        isCurrent = false;
-        clearTimeout(timer);
-      };
-    } else {
-      setCompanyFeedback({ company: null, error: null });
-      setIsSearchingCompany(false);
-    }
-  }, [companySlug]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
+    setErrorMsg(null);
 
-    const cleanSlug = companySlug.trim().toLowerCase();
-    const cleanUser = username.trim().toLowerCase();
-    const cleanPass = password.trim();
-
-    if (!cleanSlug || !cleanUser || !cleanPass) {
-      setErrorMessage('Por favor, preencha todos os campos.');
-      return;
-    }
-
-    if (companyFeedback.company && !companyFeedback.company.active) {
-      setErrorMessage('Esta empresa está temporariamente indisponível.');
+    const cleanLogin = loginInput.trim();
+    if (!cleanLogin || !password) {
+      setErrorMsg('Por favor, preencha todos os campos.');
       return;
     }
 
     setIsSubmitting(true);
-
     try {
       const res = await login({
-        companySlug: cleanSlug,
-        username: cleanUser,
-        password: cleanPass,
+        login: cleanLogin,
+        password,
       });
 
-      if (res.success) {
-        if (onSuccess) onSuccess();
-      } else {
-        setErrorMessage(res.error || 'Empresa, usuário ou senha inválidos.');
+      if (!res.success) {
+        setErrorMsg(res.error || 'Login ou senha inválidos.');
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Erro de conexão com o servidor';
-      setErrorMessage(message);
+    } catch {
+      setErrorMsg('Não foi possível conectar ao servidor. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const activeBranding = companyFeedback.company;
-
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-8 sm:py-12 px-4 sm:px-6 lg:px-8 font-sans selection:bg-brand-500 selection:text-white">
-      
-      {/* Dynamic Header Branding */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-3 mb-6 animate-fadeIn">
-        <div className="flex justify-center">
-          <div className="p-2.5 rounded-3xl bg-white border border-slate-200 shadow-md transition-all duration-300">
-            <img
-              src={activeBranding?.logoUrl || '/logo.jpg'}
-              alt={activeBranding?.name || 'Vistoria YZZY'}
-              className="h-16 sm:h-20 w-auto max-w-[220px] object-contain rounded-2xl"
-            />
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 px-4 font-sans selection:bg-blue-600 selection:text-white">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+        
+        {/* Brand Logo Header */}
+        <div className="flex justify-center items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/30">
+            <Shield className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">
+              Vistoria <span className="text-blue-600">YZZY</span>
+            </h1>
+            <p className="text-xs font-medium text-slate-500">
+              Plataforma Imobiliária Multi-Tenant
+            </p>
           </div>
         </div>
 
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-            {activeBranding?.name || 'Sistema de Vistorias'}
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
-            Acesso Corporativo Seguro • Multi-Tenant
-          </p>
-        </div>
+        <h2 className="mt-2 text-center text-xl font-bold tracking-tight text-slate-800">
+          Entrar no Sistema
+        </h2>
+        <p className="mt-1 text-center text-sm text-slate-500">
+          Utilize seu identificador de Login YZZY
+        </p>
       </div>
 
-      {/* Main Login Box */}
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-7 px-6 sm:px-9 rounded-3xl border border-slate-200 shadow-xl space-y-5">
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white py-8 px-6 sm:px-10 shadow-xl shadow-slate-200/60 rounded-3xl border border-slate-200">
           
-          <div className="pb-2 border-b border-slate-100 flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Identificação do Colaborador
-            </span>
-            {isSearchingCompany && (
-              <span className="text-[10px] text-brand-600 flex items-center gap-1 font-semibold">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>Verificando...</span>
-              </span>
-            )}
-          </div>
-
-          {/* Error Banner */}
-          {errorMessage && (
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium flex items-center gap-2 animate-shake">
-              <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-              <span>{errorMessage}</span>
+          {errorMsg && (
+            <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3 text-rose-700 text-sm animate-in fade-in duration-200">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4 text-xs sm:text-sm">
-            
-            {/* 1. Código / Slug da Empresa */}
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            {/* Campo Login YZZY */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-slate-700 font-bold">Código da Empresa</label>
-                {activeBranding && activeBranding.active && (
-                  <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>{activeBranding.name}</span>
-                  </span>
-                )}
-                {companyFeedback.error && (
-                  <span className="text-[10px] font-bold text-amber-600 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    <span>{companyFeedback.error}</span>
-                  </span>
-                )}
-              </div>
-              <div className="relative">
-                <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <label htmlFor="loginInput" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Login YZZY
+              </label>
+              <div className="mt-1">
                 <input
+                  id="loginInput"
+                  name="login"
                   type="text"
-                  value={companySlug}
-                  onChange={(e) => setCompanySlug(e.target.value.toLowerCase())}
-                  placeholder="Ex: vistoria-yzzy ou imobiliaria-alfa"
-                  className={`w-full bg-slate-50 border rounded-xl pl-10 pr-4 py-2.5 text-slate-900 font-mono font-medium focus:outline-none focus:bg-white transition-colors lowercase ${
-                    companyFeedback.error 
-                      ? 'border-amber-300 focus:border-amber-500' 
-                      : activeBranding 
-                        ? 'border-emerald-300 focus:border-emerald-500' 
-                        : 'border-slate-200 focus:border-brand-500'
-                  }`}
+                  autoComplete="username"
                   required
+                  placeholder="nome.sobrenome@empresa.yzzy"
+                  value={loginInput}
+                  onChange={(e) => setLoginInput(e.target.value)}
+                  className="appearance-none block w-full px-4 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm bg-slate-50/50 hover:bg-white transition-colors"
                 />
               </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                Exemplo: joao.silva@imobiliariaalpha.yzzy
+              </p>
             </div>
 
-            {/* 2. Nome de Usuário */}
+            {/* Campo Senha */}
             <div>
-              <label className="block text-slate-700 font-bold mb-1">Nome de Usuário</label>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <label htmlFor="passwordInput" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                Senha de Acesso
+              </label>
+              <div className="mt-1 relative">
                 <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase().trim())}
-                  placeholder="Ex: joao ou ricso.biella"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-slate-900 font-medium focus:outline-none focus:border-brand-500 focus:bg-white transition-colors lowercase"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* 3. Senha */}
-            <div>
-              <label className="block text-slate-700 font-bold mb-1">Senha</label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
+                  id="passwordInput"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  required
+                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Digite sua senha"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-10 py-2.5 text-slate-900 focus:outline-none focus:border-brand-500 focus:bg-white transition-colors font-mono"
-                  required
+                  className="appearance-none block w-full px-4 py-3 pr-11 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm bg-slate-50/50 hover:bg-white transition-colors"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  tabIndex={-1}
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
 
-            {/* Botão Entrar */}
+            {/* Botão de Entrada */}
             <div className="pt-2">
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-sm shadow-lg shadow-brand-600/25 transition-all active:scale-[0.98] disabled:opacity-50"
+                disabled={isSubmitting || isLoading}
+                className="w-full flex justify-center items-center gap-2 py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-blue-600/20 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
-                {isSubmitting ? (
+                {isSubmitting || isLoading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-5 h-5 animate-spin" />
                     <span>Autenticando...</span>
                   </>
                 ) : (
                   <>
-                    <span>Entrar no Sistema</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <LogIn className="w-5 h-5" />
+                    <span>Entrar no Vistoria YZZY</span>
                   </>
                 )}
               </button>
             </div>
-
           </form>
 
-          {/* Rodapé de Segurança */}
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-medium">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Isolamento Multi-Tenant com RLS e Criptografia Supabase</span>
-          </div>
-
         </div>
-      </div>
 
+        <p className="mt-6 text-center text-xs text-slate-400">
+          Vistoria YZZY &copy; {new Date().getFullYear()} — Todos os direitos reservados.
+        </p>
+      </div>
     </div>
   );
 };

@@ -161,6 +161,7 @@ export function convertSectionsToRooms(sections: TranscribedSection[]): Room[] {
       id: `room-${Date.now()}-${rIdx++}`,
       name,
       items,
+      photos: [],
     });
   });
 

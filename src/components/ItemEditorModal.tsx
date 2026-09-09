@@ -48,11 +48,11 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
 
   React.useEffect(() => {
     if (item) {
-      setName(item.name);
-      setStatus(item.status);
-      setDescription(item.description);
-      setNeedRepair(item.needRepair);
-      setRepairDetails(item.repairDetails || '');
+      setName(item.name || '');
+      setStatus(item.status || (typeof item.condition_status === 'string' ? item.condition_status : 'Bom'));
+      setDescription(item.description || '');
+      setNeedRepair(Boolean(item.needRepair || item.requires_repair));
+      setRepairDetails(item.repairDetails || item.repair_notes || '');
       setRepairUrgency(item.repairUrgency || 'Média');
       setPhotos(item.photos || []);
     } else {
@@ -279,7 +279,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                     {/* View overlay */}
                     <button
                       type="button"
-                      onClick={() => onViewPhoto(photo.dataUrl, `${name} - Foto ${pIdx + 1}`)}
+                      onClick={() => onViewPhoto(photo.dataUrl || photo.url || '', `${name} - Foto ${pIdx + 1}`)}
                       className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
                     >
                       <Maximize2 className="w-5 h-5" />

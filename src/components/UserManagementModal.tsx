@@ -50,6 +50,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   const loadUsers = useCallback(async () => {
+    if (!currentSession.company?.id) return;
     setIsLoading(true);
     try {
       const list = await fetchCompanyUsers(currentSession.company.id);
@@ -59,7 +60,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [currentSession.company.id]);
+  }, [currentSession.company?.id]);
 
   useEffect(() => {
     if (isOpen) {
@@ -78,6 +79,11 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
     if (password.trim().length < 6) {
       showToast('A senha deve ter no mínimo 6 caracteres.', 'error');
+      return;
+    }
+
+    if (!currentSession.company?.id) {
+      showToast('Empresa não selecionada.', 'error');
       return;
     }
 
@@ -207,7 +213,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
                 Gestão da Equipe & Acessos
               </h2>
               <p className="text-[11px] text-slate-500 font-medium">
-                Empresa: <strong>{currentSession.company.name}</strong> ({currentSession.company.slug})
+                Empresa: <strong>{currentSession.company?.name || 'Vistoria YZZY'}</strong> ({currentSession.company?.slug || 'yzzy'})
               </p>
             </div>
           </div>
@@ -259,7 +265,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
             <form onSubmit={handleCreateUser} className="bg-brand-50/50 border border-brand-200/80 rounded-2xl p-4 sm:p-5 space-y-4 animate-fadeIn">
               <div className="flex items-center gap-2 text-brand-800 font-bold text-xs border-b border-brand-200/60 pb-2">
                 <UserPlus className="w-4 h-4 text-brand-600" />
-                <span>Cadastrar Novo Colaborador na {currentSession.company.name}</span>
+                <span>Cadastrar Novo Colaborador na {currentSession.company?.name || 'Empresa'}</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -477,7 +483,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-start gap-3">
             <Shield className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
             <p className="text-xs text-slate-600 leading-relaxed">
-              <strong>Como o novo colaborador entra:</strong> No login, ele informará o código da empresa (<strong>{currentSession.company.slug}</strong>), o <strong>Nome de Usuário</strong> e a <strong>Senha</strong> cadastrados aqui.
+              <strong>Como o novo colaborador entra:</strong> No login, ele informará o código da empresa (<strong>{currentSession.company?.slug || 'empresa'}</strong>), o <strong>Nome de Usuário</strong> e a <strong>Senha</strong> cadastrados aqui.
             </p>
           </div>
 

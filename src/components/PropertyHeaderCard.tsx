@@ -60,7 +60,7 @@ export const PropertyHeaderCard: React.FC<PropertyHeaderCardProps> = ({ data, on
               <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
                 {data.title || 'Laudo de Vistoria'}
               </h1>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${typeBadges[data.inspectionType]}`}>
+              <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold border ${typeBadges[data.inspectionType || 'Entrada'] || ''}`}>
                 {data.inspectionType}
               </span>
             </div>

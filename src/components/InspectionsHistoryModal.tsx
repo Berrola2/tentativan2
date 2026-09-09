@@ -197,7 +197,7 @@ export const InspectionsHistoryModal: React.FC<InspectionsHistoryModalProps> = (
                         <span className="font-bold text-white text-sm group-hover:text-brand-300 transition-colors">
                           {item.title || 'Laudo sem título'}
                         </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${typeBadgeColors[item.inspectionType]}`}>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${(typeBadgeColors as Record<string, string>)[item.inspectionType || 'Entrada'] || ''}`}>
                           {item.inspectionType}
                         </span>
                         {isCurrent && (

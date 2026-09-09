@@ -81,7 +81,7 @@ export const TemplateSelectorModal: React.FC<TemplateSelectorModalProps> = ({
               >
                 <div className="flex items-start gap-3.5">
                   <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                    {getTemplateIcon(template.icon)}
+                    {getTemplateIcon(template.icon || 'home')}
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-slate-900 group-hover:text-brand-600 transition-colors">

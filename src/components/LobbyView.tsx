@@ -262,7 +262,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 <div className="space-y-3">
                   {/* Top line with badge */}
                   <div className="flex items-start justify-between gap-2">
-                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${typeBadges[item.inspectionType]}`}>
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${typeBadges[item.inspectionType || 'Entrada'] || ''}`}>
                       {item.inspectionType}
                     </span>
                     <span className="text-[11px] text-slate-400 flex items-center gap-1 font-medium">

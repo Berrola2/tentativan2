@@ -35,7 +35,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
     Ruim: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
   };
 
-  const currentStatus = statusConfig[item.status] || statusConfig['Bom'];
+  const currentStatus = statusConfig[item.status || 'Bom'] || statusConfig['Bom'];
 
   const handleQuickCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -147,7 +147,7 @@ export const ItemCard: React.FC<ItemCardProps> = ({
             {item.photos.slice(0, 6).map((photo, index) => (
               <div
                 key={photo.id}
-                onClick={() => onViewPhoto(photo.dataUrl, `${item.name} - Foto ${index + 1}`)}
+                onClick={() => onViewPhoto(photo.dataUrl || photo.url || '', `${item.name} - Foto ${index + 1}`)}
                 className="relative group aspect-square rounded-xl overflow-hidden bg-slate-100 border border-slate-200 cursor-pointer shadow-sm"
               >
                 <img

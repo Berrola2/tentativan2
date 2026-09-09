@@ -1,7 +1,5 @@
 // ==============================================================================
-// CONTEXTO DE AUTENTICAÇÃO OFICIAL — VISTORIA YZZY
-// ==============================================================================
-// Gerenciamento reativo do estado da sessão oficial do Supabase Auth
+// CONTEXTO DE AUTENTICAÇÃO OFICIAL — VISTORIA YZZY (ETAPA 02)
 // ==============================================================================
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
@@ -14,22 +12,29 @@ import type {
 } from '../types/auth';
 import { getSupabaseClient } from '../services/supabaseClient';
 import { 
-  loginWithUsername, 
+  loginWithYzzy, 
   logoutUser, 
-  fetchCurrentUserData 
+  fetchCurrentUserData,
+  changeUserPassword 
 } from '../services/auth';
 
 interface AuthContextType {
   session: AuthSession | null;
   user: AuthUser | null;
   role: UserRole | null;
+  companyId: string | null;
+  companyName: string | null;
+  companySlug: string | null;
   isAuthenticated: boolean;
-  isManager: boolean;
+  isSuperAdmin: boolean;
+  isCompanyManager: boolean;
   isInspector: boolean;
-  isAdminViewer: boolean;
+  isViewer: boolean;
+  mustChangePassword: boolean;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<AuthActionResult<AuthSession>>;
   logout: () => Promise<void>;
+  changePassword: (newPassword: string) => Promise<AuthActionResult>;
   refreshUser: () => Promise<void>;
 }
 
@@ -41,7 +46,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const client = getSupabaseClient();
 
-  // Carrega os dados de perfil e empresa do usuário autenticado no Supabase
   const loadUserData = useCallback(async (
     userId: string, 
     accessToken: string, 
@@ -61,23 +65,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshToken,
         expiresAt,
         user: userData,
-        company: {
+        company: userData.companyId ? {
           id: userData.companyId,
-          name: userData.companyName,
-          slug: userData.companySlug,
+          name: userData.companyName || '',
+          slug: userData.companySlug || '',
           active: true,
-        },
+        } : null,
         loggedAt: new Date().toISOString(),
       };
 
       setSession(activeSession);
     } catch (err) {
-      console.error('Erro ao sincronizar perfil do usuário autenticado:', err);
+      console.error('Erro ao carregar dados do usuário:', err);
       setSession(null);
     }
   }, [client]);
 
-  // Inicialização da sessão e escuta das mudanças de autenticação do Supabase
   useEffect(() => {
     let isMounted = true;
 
@@ -103,7 +106,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initAuth();
 
-    // Listener oficial do Supabase Auth
     const { data: { subscription } } = client.auth.onAuthStateChange(async (event, currentAuthSession) => {
       if (!isMounted) return;
 
@@ -126,18 +128,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [client, loadUserData]);
 
-  // Função de Login
   const login = useCallback(async (credentials: LoginCredentials): Promise<AuthActionResult<AuthSession>> => {
     setIsLoading(true);
     try {
-      const res = await loginWithUsername(credentials);
+      const res = await loginWithYzzy(credentials);
       if (res.success && res.data) {
         setSession(res.data);
         return { success: true, data: res.data };
       }
       return { 
         success: false, 
-        error: res.error || 'Usuário ou senha inválidos.',
+        error: res.error || 'Login ou senha inválidos.',
         retryAfterSeconds: res.retryAfterSeconds,
       };
     } finally {
@@ -145,7 +146,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Função de Logout
   const logout = useCallback(async (): Promise<void> => {
     setIsLoading(true);
     try {
@@ -156,7 +156,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // Função para recarregar dados do usuário
+  const changePassword = useCallback(async (newPassword: string): Promise<AuthActionResult> => {
+    const res = await changeUserPassword(newPassword);
+    if (res.success && session?.user) {
+      setSession((prev) => prev ? {
+        ...prev,
+        user: { ...prev.user, mustChangePassword: false },
+      } : null);
+    }
+    return res;
+  }, [session]);
+
   const refreshUser = useCallback(async (): Promise<void> => {
     if (session?.user.id && session.accessToken && session.refreshToken) {
       await loadUserData(
@@ -171,21 +181,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value = useMemo<AuthContextType>(() => {
     const user = session?.user || null;
     const role = user?.role || null;
+    const mustChangePassword = !!user?.mustChangePassword;
 
     return {
       session,
       user,
       role,
+      companyId: user?.companyId || null,
+      companyName: user?.companyName || null,
+      companySlug: user?.companySlug || null,
       isAuthenticated: !!session && !!user,
-      isManager: role === 'ROLE_MANAGER',
+      isSuperAdmin: role === 'ROLE_SUPER_ADMIN',
+      isCompanyManager: role === 'ROLE_MANAGER',
       isInspector: role === 'ROLE_INSPECTOR',
-      isAdminViewer: role === 'ROLE_ADMIN_VIEWER',
+      isViewer: role === 'ROLE_VIEWER' || role === 'ROLE_ADMIN_VIEWER',
+      mustChangePassword,
       isLoading,
       login,
       logout,
+      changePassword,
       refreshUser,
     };
-  }, [session, isLoading, login, logout, refreshUser]);
+  }, [session, isLoading, login, logout, changePassword, refreshUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
