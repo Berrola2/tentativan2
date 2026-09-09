@@ -62,11 +62,16 @@ serve(async (req: Request) => {
     );
   }
 
+  const correlationId = crypto.randomUUID();
+  const AUTH_FUNCTION_VERSION = '2026-09-09-v3-autoheal';
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || serviceRoleKey;
 
     if (!supabaseUrl || !serviceRoleKey) {
+      console.error(`[CID:${correlationId}] [CONFIG_ERROR] SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY ausentes.`);
       return new Response(
         JSON.stringify({ success: false, error: 'Erro de configuração interna do servidor.' }),
         { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -93,6 +98,7 @@ serve(async (req: Request) => {
     }
 
     const cleanLogin = login.trim().toLowerCase();
+    console.log(`[CID:${correlationId}] [LOGIN_RECEIVED] Versão: ${AUTH_FUNCTION_VERSION} | Alias: ${cleanLogin}`);
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -116,6 +122,7 @@ serve(async (req: Request) => {
 
     const ipLimit = Array.isArray(ipLimitData) ? ipLimitData[0] : ipLimitData;
     if (ipLimit && !ipLimit.allowed) {
+      console.warn(`[CID:${correlationId}] [RATE_LIMIT_IP_BLOCKED] IP: ${clientIp}`);
       return new Response(
         JSON.stringify({
           success: false,
@@ -143,6 +150,7 @@ serve(async (req: Request) => {
 
     const loginLimit = Array.isArray(loginLimitData) ? loginLimitData[0] : loginLimitData;
     if (loginLimit && !loginLimit.allowed) {
+      console.warn(`[CID:${correlationId}] [RATE_LIMIT_ACCOUNT_BLOCKED] Login: ${cleanLogin}`);
       return new Response(
         JSON.stringify({
           success: false,
@@ -161,10 +169,11 @@ serve(async (req: Request) => {
     }
 
     // 4. Resolução da Identidade Interna (Login YZZY -> auth_email real de auth.users)
+    console.log(`[CID:${correlationId}] [IDENTITY_RESOLUTION_STARTED] Alias: ${cleanLogin}`);
     let internalAuthEmail = cleanLogin;
     let identityUser: Record<string, any> | null = null;
 
-    // 4.1 Tentar resolução via RPC segura com junção atômica em auth.users
+    // 4.1 Resolução via RPC segura resolve_login_yzzy_identity com auto-healing
     const { data: rpcRows, error: rpcErr } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
       p_login_alias: cleanLogin,
     });
@@ -172,7 +181,10 @@ serve(async (req: Request) => {
     if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
       identityUser = rpcRows[0];
       internalAuthEmail = identityUser.auth_email;
+      console.log(`[CID:${correlationId}] [IDENTITY_FOUND] UserId: ${identityUser.user_id} | Role: ${identityUser.role} | EmailConfirmed: ${identityUser.email_confirmed}`);
     } else {
+      console.warn(`[CID:${correlationId}] [IDENTITY_NOT_FOUND_RPC] Erro/Vazio: ${rpcErr?.message || 'Nenhum registro'}`);
+      
       // 4.2 Fallback direto na tabela private.user_auth_identities
       const { data: directIdentity } = await supabaseAdmin
         .schema('private')
@@ -183,26 +195,36 @@ serve(async (req: Request) => {
 
       if (directIdentity && directIdentity.auth_email) {
         internalAuthEmail = directIdentity.auth_email;
+        console.log(`[CID:${correlationId}] [IDENTITY_FOUND_DIRECT] Email: ${internalAuthEmail.split('@')[0]}***@...`);
+      } else {
+        console.warn(`[CID:${correlationId}] [IDENTITY_NOT_FOUND_DIRECT] Alias não cadastrado.`);
       }
     }
 
-    console.log(`[login-with-yzzy] Processando login para alias: ${cleanLogin} -> auth_email: ${internalAuthEmail.split('@')[0]}***@${internalAuthEmail.split('@')[1] || ''}`);
+    console.log(`[CID:${correlationId}] [SIGN_IN_STARTED] Email de destino: ${internalAuthEmail.split('@')[0]}***@${internalAuthEmail.split('@')[1] || ''}`);
 
     // 5. Autenticação no Supabase Auth
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.signInWithPassword({
+    // Usar cliente com anonKey para grant_type=password
+    const authClient = createClient(supabaseUrl, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { data: authData, error: authErr } = await authClient.auth.signInWithPassword({
       email: internalAuthEmail,
       password: password,
     });
 
     if (authErr || !authData?.user || !authData?.session) {
-      console.warn(`[login-with-yzzy] Falha de autenticação Supabase Auth: ${authErr?.message || 'Sessão nula'} (Código/Status: ${(authErr as any)?.status || (authErr as any)?.code || 'auth_failed'})`);
+      const errStatus = (authErr as any)?.status || 401;
+      const errCode = (authErr as any)?.code || authErr?.name || 'invalid_grant';
+      console.warn(`[CID:${correlationId}] [SIGN_IN_FAILURE] Motivo: ${authErr?.message || 'Sessão nula'} | Código: ${errCode} | Status: ${errStatus}`);
 
       // Registrar falha de auditoria (sem atribuir company_id não autenticado)
       await supabaseAdmin.from('security_audit_logs').insert({
         company_id: null,
         event_type: 'LOGIN_FAILED',
         ip_address: clientIp,
-        metadata: { login_attempt: cleanLogin, error_code: (authErr as any)?.code || authErr?.name },
+        metadata: { login_attempt: cleanLogin, correlation_id: correlationId, error_code: errCode },
       });
 
       return new Response(
@@ -210,6 +232,8 @@ serve(async (req: Request) => {
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log(`[CID:${correlationId}] [SIGN_IN_SUCCESS] Usuário autenticado com sucesso no Supabase Auth. AuthUserId: ${authData.user.id}`);
 
     const userId = authData.user.id;
 
@@ -221,12 +245,14 @@ serve(async (req: Request) => {
       .maybeSingle();
 
     if (profErr || !profileData || !profileData.active) {
-      console.warn(`[login-with-yzzy] Perfil não encontrado ou inativo para userId: ${userId}`);
+      console.warn(`[CID:${correlationId}] [PROFILE_NOT_FOUND_OR_INACTIVE] Perfil inválido para userId: ${userId}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log(`[CID:${correlationId}] [PROFILE_FOUND] Role: ${profileData.role} | must_change_password: ${profileData.must_change_password}`);
 
     let companyData: { id: string; name: string; slug: string; active: boolean } | null = null;
     if (profileData.company_id) {
@@ -237,7 +263,7 @@ serve(async (req: Request) => {
         .maybeSingle();
 
       if (!comp || !comp.active) {
-        console.warn(`[login-with-yzzy] Empresa inativa para company_id: ${profileData.company_id}`);
+        console.warn(`[CID:${correlationId}] [COMPANY_INACTIVE] Empresa inativa para company_id: ${profileData.company_id}`);
         return new Response(
           JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
           { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -258,11 +284,12 @@ serve(async (req: Request) => {
       company_id: profileData.company_id,
       event_type: 'LOGIN_SUCCESS',
       ip_address: clientIp,
-      metadata: { role: profileData.role, login: cleanLogin },
+      metadata: { role: profileData.role, login: cleanLogin, correlation_id: correlationId },
     });
 
     const responsePayload = {
       success: true,
+      correlationId,
       session: {
         access_token: authData.session.access_token,
         refresh_token: authData.session.refresh_token,
@@ -285,13 +312,15 @@ serve(async (req: Request) => {
       },
     };
 
+    console.log(`[CID:${correlationId}] [AUTH_COMPLETED_SUCCESS] Resposta 200 enviada ao cliente.`);
+
     return new Response(
       JSON.stringify(responsePayload),
       { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Erro interno.';
-    console.error('[ERRO login-with-yzzy]:', message);
+    console.error(`[CID:${correlationId}] [ERRO login-with-yzzy]:`, message);
     return new Response(
       JSON.stringify({ success: false, error: 'Erro ao processar autenticação. Tente novamente.' }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
