@@ -85,6 +85,7 @@ serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '';
 
     if (!supabaseUrl || !serviceRoleKey) {
       console.error(`[CID:${correlationId}] [CONFIG_ERROR] SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados.`);
@@ -95,7 +96,10 @@ serve(async (req: Request) => {
     }
 
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization') || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    let token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+      token = token.slice(1, -1).trim();
+    }
 
     console.log(`[CID:${correlationId}] [ADMIN_REQUEST_RECEIVED] Origin: ${requestOrigin || 'N/A'}`);
 
@@ -107,17 +111,81 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log(`[CID:${correlationId}] [AUTH_HEADER_PRESENT] Bearer token presente (prefix: ${token.substring(0, 10)}..., len: ${token.length})`);
+    console.log(`[CID:${correlationId}] [AUTH_HEADER_PRESENT] Bearer token presente (prefix: ${token.substring(0, 15)}..., len: ${token.length})`);
 
+    // 1. Cliente com privilégios administrativos para operações de banco
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 1. Identificar usuário autenticado e suas credenciais via GoTrue
-    const { data: { user: callerUser }, error: callerAuthErr } = await supabaseAdmin.auth.getUser(token);
+    // 2. Validação do JWT de usuário via GoTrue (100% server-side)
+    let callerUser: { id: string; email?: string } | null = null;
+    let authErrorMessage = '';
 
-    if (callerAuthErr || !callerUser) {
-      console.warn(`[CID:${correlationId}] [TOKEN_INVALID] Falha ao autenticar token JWT: ${callerAuthErr?.message || 'Usuário nulo'}`);
+    // Estratégia 1: Cliente oficial com ANON_KEY e Bearer header (padrão oficial Supabase Edge Functions)
+    if (anonKey) {
+      try {
+        const userClient = createClient(supabaseUrl, anonKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+          global: { headers: { Authorization: `Bearer ${token}` } },
+        });
+        const { data: userData, error: userErr } = await userClient.auth.getUser();
+        if (userData?.user) {
+          callerUser = userData.user;
+        } else if (userErr) {
+          authErrorMessage = userErr.message;
+        }
+      } catch (errAnon) {
+        authErrorMessage = errAnon instanceof Error ? errAnon.message : 'Erro na validação via anonClient';
+      }
+    }
+
+    // Estratégia 2: Validação direta via getUser(token) no cliente Admin
+    if (!callerUser) {
+      try {
+        const { data: adminUserData, error: adminUserErr } = await supabaseAdmin.auth.getUser(token);
+        if (adminUserData?.user) {
+          callerUser = adminUserData.user;
+          authErrorMessage = '';
+        } else if (adminUserErr && !authErrorMessage) {
+          authErrorMessage = adminUserErr.message;
+        }
+      } catch (errAdmin) {
+        if (!authErrorMessage) {
+          authErrorMessage = errAdmin instanceof Error ? errAdmin.message : 'Erro no adminClient.getUser';
+        }
+      }
+    }
+
+    // Estratégia 3: Chamada HTTP direta ao endpoint GoTrue /auth/v1/user
+    if (!callerUser) {
+      try {
+        const goTrueRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'apikey': anonKey || serviceRoleKey,
+          },
+        });
+        if (goTrueRes.ok) {
+          const directUser = await goTrueRes.json();
+          if (directUser && directUser.id) {
+            callerUser = directUser;
+            authErrorMessage = '';
+          }
+        } else {
+          const errBody = await goTrueRes.json().catch(() => ({}));
+          console.warn(`[CID:${correlationId}] [GOTRUE_HTTP_ERROR] Status: ${goTrueRes.status} | Msg: ${errBody?.msg || errBody?.message || errBody?.error_description || 'Erro GoTrue'}`);
+          if (!authErrorMessage) {
+            authErrorMessage = errBody?.msg || errBody?.message || 'Sessão inválida no GoTrue';
+          }
+        }
+      } catch (fetchErr) {
+        console.warn(`[CID:${correlationId}] [GOTRUE_FETCH_EXCEPTION]`, fetchErr);
+      }
+    }
+
+    if (!callerUser) {
+      console.warn(`[CID:${correlationId}] [TOKEN_INVALID] Falha ao autenticar token JWT: ${authErrorMessage || 'Usuário nulo'}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Sessão inválida ou expirada.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -127,7 +195,7 @@ serve(async (req: Request) => {
     console.log(`[CID:${correlationId}] [TOKEN_VALID] Token validado com sucesso via GoTrue. UID: ${callerUser.id}`);
     console.log(`[CID:${correlationId}] [USER_RESOLVED] Caller User: ${callerUser.id} | Email: ${maskEmail(callerUser.email)}`);
 
-    // 2. Consultar perfil e permissões no banco de dados (server-side)
+    // 3. Consultar perfil e permissões no banco de dados (server-side pelo UUID autenticado)
     const { data: callerProfile, error: callerProfErr } = await supabaseAdmin
       .from('profiles')
       .select('id, company_id, role, active')
@@ -157,6 +225,29 @@ serve(async (req: Request) => {
 
     const body = await req.json();
     const { action } = body;
+
+    // =========================================================================
+    // AÇÃO 0: AUDITORIA / CHECK DE SESSÃO AUTENTICADA
+    // =========================================================================
+    if (action === 'check_session' || action === 'ping') {
+      if (isSuperAdmin) {
+        console.log(`[CID:${correlationId}] [ROLE_SUPER_ADMIN_CONFIRMED] Permissão de Super Admin confirmada.`);
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          correlationId,
+          user: {
+            id: callerUser.id,
+            email: maskEmail(callerUser.email),
+            role: callerProfile.role,
+            companyId: callerProfile.company_id,
+            active: callerProfile.active,
+          },
+        }),
+        { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // =========================================================================
     // AÇÃO 1: SUPER_ADMIN — Criar nova empresa e primeiro gerente

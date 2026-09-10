@@ -55,8 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const userData = await fetchCurrentUserData(userId);
       if (!userData) {
-        setSession(null);
-        await client.auth.signOut();
+        console.warn('Perfil de usuário não carregado via profiles, mantendo sessão ativa.');
         return;
       }
 
