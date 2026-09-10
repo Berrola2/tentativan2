@@ -675,3 +675,161 @@ export async function fetchCompanies(): Promise<Company[]> {
     return [];
   }
 }
+
+/**
+ * SUPER_ADMIN: Exclui permanentemente uma empresa previamente desativada (Hard Delete)
+ */
+export async function adminDeleteCompanyPermanently(
+  targetCompanyId: string,
+  confirmationName: string,
+  reason: string
+): Promise<AuthActionResult> {
+  const client = getSupabaseClient();
+  try {
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
+    // 1. Tentar via Edge Function
+    try {
+      const { data, error } = await client.functions.invoke('admin-manage-user', {
+        body: { 
+          action: 'delete_company_permanently', 
+          targetCompanyId, 
+          confirmationName, 
+          reason 
+        },
+        headers: {
+          Authorization: `Bearer ${tokenResult.token}`,
+        },
+      });
+
+      if (!error && data?.success) {
+        return { success: true };
+      }
+
+      if (data?.error) {
+        return { success: false, error: data.error };
+      }
+    } catch {
+      // Se Edge Function falhar na rota/rede, tenta fallback via RPC
+    }
+
+    // 2. Fallback via RPC PostgreSQL
+    const { data: rpcData, error: rpcError } = await client.rpc('admin_delete_company_permanently', {
+      p_target_company_id: targetCompanyId,
+      p_confirmation_name: confirmationName,
+      p_reason: reason,
+    });
+
+    if (rpcError) {
+      return { success: false, error: rpcError.message || 'Falha ao executar exclusão da empresa via banco.' };
+    }
+
+    if (rpcData && rpcData.success === false) {
+      return { success: false, error: rpcData.error || 'Exclusão recusada pelo servidor.' };
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Erro ao excluir empresa';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * SUPER_ADMIN: Busca registros reais da Auditoria de Segurança
+ */
+export async function fetchSecurityAuditLogs(limit = 100): Promise<any[]> {
+  const client = getSupabaseClient();
+  try {
+    // 1. Tentar via RPC dedicada
+    const { data: rpcData, error: rpcErr } = await client.rpc('get_security_audit_logs', { p_limit: limit });
+    if (!rpcErr && Array.isArray(rpcData)) {
+      return rpcData;
+    }
+
+    // 2. Fallback via select direto RLS
+    const { data, error } = await client
+      .from('security_audit_logs')
+      .select(`
+        id,
+        company_id,
+        user_id,
+        event_type,
+        ip_address,
+        metadata,
+        created_at,
+        company:companies(id, name, slug),
+        profile:profiles(id, full_name, username)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error || !data) return [];
+
+    return data.map((log: any) => ({
+      id: log.id,
+      company_id: log.company_id,
+      company_name: log.company?.name || null,
+      company_slug: log.company?.slug || null,
+      user_id: log.user_id,
+      user_full_name: log.profile?.full_name || null,
+      user_username: log.profile?.username || null,
+      event_type: log.event_type,
+      ip_address: log.ip_address,
+      metadata: log.metadata,
+      created_at: log.created_at,
+    }));
+  } catch (err) {
+    console.error('Erro ao buscar logs de auditoria:', err);
+    return [];
+  }
+}
+
+/**
+ * SUPER_ADMIN: Busca registros reais da Auditoria do Sistema
+ */
+export async function fetchSystemAuditLogs(limit = 100): Promise<any[]> {
+  const client = getSupabaseClient();
+  try {
+    // 1. Tentar via RPC dedicada
+    const { data: rpcData, error: rpcErr } = await client.rpc('get_system_audit_logs', { p_limit: limit });
+    if (!rpcErr && Array.isArray(rpcData)) {
+      return rpcData;
+    }
+
+    // 2. Fallback via select direto RLS
+    const { data, error } = await client
+      .from('system_audit_logs')
+      .select(`
+        id,
+        event_type,
+        severity,
+        actor_id,
+        details,
+        created_at,
+        profile:profiles!system_audit_logs_actor_id_fkey(id, full_name, username)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error || !data) return [];
+
+    return data.map((log: any) => ({
+      id: log.id,
+      event_type: log.event_type,
+      severity: log.severity,
+      actor_id: log.actor_id,
+      actor_name: log.profile?.full_name || null,
+      actor_username: log.profile?.username || null,
+      details: log.details,
+      created_at: log.created_at,
+    }));
+  } catch (err) {
+    console.error('Erro ao buscar logs do sistema:', err);
+    return [];
+  }
+}
+

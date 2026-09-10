@@ -643,6 +643,160 @@ serve(async (req: Request) => {
     }
 
     // =========================================================================
+    // AÇÃO 1.6: SUPER_ADMIN — Excluir Empresa Permanentemente (Hard Delete)
+    // =========================================================================
+    if (action === 'delete_company_permanently') {
+      if (!isSuperAdmin) {
+        console.warn(`[CID:${correlationId}] [FORBIDDEN] Tentativa de delete_company_permanently por não-SuperAdmin (Role: ${callerProfile.role})`);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Apenas Super Administradores podem excluir empresas permanentemente.' }),
+          { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { targetCompanyId, confirmationName, reason } = body;
+
+      if (!targetCompanyId) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'ID da empresa não informado.' }),
+          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (!reason || !reason.trim()) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'O motivo da exclusão permanente é obrigatório.' }),
+          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Buscar empresa
+      const { data: comp, error: compErr } = await supabaseAdmin
+        .from('companies')
+        .select('id, name, slug, trade_name, active')
+        .eq('id', targetCompanyId)
+        .single();
+
+      if (compErr || !comp) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Empresa não encontrada.' }),
+          { status: 404, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // BARREIRA 1: A empresa PRECISA estar previamente DESATIVADA
+      if (comp.active !== false) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'A empresa precisa estar previamente desativada antes da exclusão permanente.' }),
+          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // BARREIRA 2: Confirmação exata pelo nome
+      const typedName = (confirmationName || '').trim();
+      const expectedName = (comp.name || '').trim();
+      const expectedTrade = (comp.trade_name || '').trim();
+      if (typedName !== expectedName && typedName !== expectedTrade) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'O nome digitado não corresponde ao nome da empresa.' }),
+          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[CID:${correlationId}] [DELETE_COMPANY_INITIATED] Deletando empresa ${comp.name} (${targetCompanyId}) | Motivo: ${reason}`);
+
+      // 1. Obter usuários da empresa (garantindo que Super Admin NUNCA seja afetado)
+      const { data: companyProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, role')
+        .eq('company_id', targetCompanyId)
+        .neq('role', 'ROLE_SUPER_ADMIN');
+
+      const userIdsToDelete = (companyProfiles || []).map((p: any) => p.id);
+
+      // 2. Limpar arquivos do Storage para os buckets da empresa
+      const buckets = ['inspection-media', 'inspection-documents', 'document-signatures'];
+      for (const b of buckets) {
+        try {
+          const { data: files } = await supabaseAdmin.storage.from(b).list(targetCompanyId, { limit: 1000 });
+          if (files && files.length > 0) {
+            const paths = files.map((f: any) => `${targetCompanyId}/${f.name}`);
+            await supabaseAdmin.storage.from(b).remove(paths);
+          }
+        } catch (storageErr) {
+          console.warn(`[CID:${correlationId}] [STORAGE_CLEANUP_WARN] Erro ao limpar bucket ${b}:`, storageErr);
+        }
+      }
+
+      // 3. Tentar executar via RPC ou via remoções em cascata
+      const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc('admin_delete_company_permanently', {
+        p_company_id: targetCompanyId,
+        p_confirmation_name: typedName,
+        p_reason: reason.trim(),
+      });
+
+      if (rpcErr) {
+        console.warn(`[CID:${correlationId}] [RPC_FAIL_FALLBACK] RPC falhou ou não existe, executando exclusão direta via adminClient:`, rpcErr.message);
+
+        // Registro de Auditoria do Sistema que sobrevive à exclusão
+        await supabaseAdmin.from('system_audit_logs').insert({
+          event_type: 'DELETE_COMPANY_PERMANENTLY',
+          severity: 'SEV-2',
+          actor_id: callerUser.id,
+          details: {
+            deleted_company_id: targetCompanyId,
+            company_name: comp.name,
+            company_slug: comp.slug,
+            reason: reason.trim(),
+            deleted_users_count: userIdsToDelete.length,
+            deleted_by: callerUser.id,
+            deleted_at: new Date().toISOString(),
+            correlation_id: correlationId,
+          },
+        }).catch(() => {});
+
+        // Excluir tabela principal (cascata cuidará das tabelas filhas com ON DELETE CASCADE)
+        const { error: delCompErr } = await supabaseAdmin
+          .from('companies')
+          .delete()
+          .eq('id', targetCompanyId);
+
+        if (delCompErr) {
+          console.error(`[CID:${correlationId}] [DELETE_COMPANY_FAILED] Erro no banco:`, delCompErr.message);
+          return new Response(
+            JSON.stringify({ success: false, error: `Falha na exclusão da empresa: ${delCompErr.message}` }),
+            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Excluir Auth Users dos colaboradores da empresa
+        for (const uid of userIdsToDelete) {
+          await supabaseAdmin.auth.admin.deleteUser(uid).catch((uErr: any) => {
+            console.warn(`[CID:${correlationId}] Erro ao deletar auth user ${uid}:`, uErr);
+          });
+        }
+      } else {
+        // Se a RPC executou, ainda garantimos a limpeza dos Auth Users
+        for (const uid of userIdsToDelete) {
+          await supabaseAdmin.auth.admin.deleteUser(uid).catch(() => {});
+        }
+      }
+
+      console.log(`[CID:${correlationId}] [DELETE_COMPANY_SUCCESS] Empresa ${comp.name} excluída permanentemente.`);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          correlationId,
+          companyId: targetCompanyId,
+          companyName: comp.name,
+          message: 'Empresa excluída permanentemente.',
+        }),
+        { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // =========================================================================
     // AÇÃO 2: COMPANY_MANAGER / SUPER_ADMIN — Cadastrar colaborador (Canônico)
     // =========================================================================
     if (action === 'create_employee') {
