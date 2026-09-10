@@ -1,7 +1,7 @@
 // ==============================================================================
-// SUPABASE EDGE FUNCTION: admin-manage-user (ETAPA 02.1 — HARDENING COMPLETO)
+// SUPABASE EDGE FUNCTION: admin-manage-user (FLUXO CANÔNICO DE PROVISIONAMENTO)
 // ==============================================================================
-// Gestão de empresas, primeiro gerente e funcionários com derivação estrita de Tenant
+// Gestão de empresas, gerentes e funcionários com fonte de verdade única
 // ==============================================================================
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -37,7 +37,7 @@ function getCorsHeaders(requestOrigin: string | null): Record<string, string> {
   };
 }
 
-function normalizeText(text: string): string {
+export function normalizeText(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -46,7 +46,7 @@ function normalizeText(text: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
-function generateTempPassword(): string {
+export function generateTempPassword(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*';
   const array = new Uint8Array(12);
   crypto.getRandomValues(array);
@@ -64,6 +64,197 @@ function maskEmail(email?: string | null): string {
   const user = parts[0];
   const domain = parts[1];
   return `${user.substring(0, 3)}***@${domain}`;
+}
+
+/**
+ * SERVIÇO CANÔNICO SERVER-SIDE DE PROVISIONAMENTO DE USUÁRIOS YZZY
+ * Responsável pelas 11 etapas canônicas com compensação atômica (rollback completo)
+ */
+async function provision_yzzy_user(
+  supabaseAdmin: any,
+  params: {
+    actorUserId: string;
+    actorRole: string;
+    actorCompanyId: string | null;
+    targetCompanyId: string | null;
+    companySlug: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    correlationId: string;
+    clientIp?: string | null;
+  }
+) {
+  const {
+    actorUserId,
+    actorRole,
+    actorCompanyId,
+    targetCompanyId,
+    companySlug,
+    firstName,
+    lastName,
+    role: requestedRole,
+    correlationId,
+    clientIp,
+  } = params;
+
+  console.log(`[CID:${correlationId}] [USER_PROVISION_STARTED] Role Solicitado: ${requestedRole} | Tenant Destino: ${targetCompanyId || 'NULL (Global)'}`);
+
+  // 1. Validar Ator Autorizado e RBAC
+  const isSuperAdmin = actorRole === 'ROLE_SUPER_ADMIN';
+  const isManager = actorRole === 'ROLE_MANAGER';
+
+  if (!isSuperAdmin && !isManager) {
+    throw new Error('Acesso negado. Apenas Super Admins e Gerentes podem provisionar usuários.');
+  }
+
+  // Se for Gerente, só pode criar dentro de sua própria empresa
+  if (!isSuperAdmin) {
+    if (!actorCompanyId || actorCompanyId !== targetCompanyId) {
+      throw new Error('Gerentes só podem criar usuários dentro da sua própria empresa.');
+    }
+    // Gerente só pode criar Vistoriador ou Visualizador
+    if (requestedRole !== 'ROLE_INSPECTOR' && requestedRole !== 'ROLE_VIEWER') {
+      throw new Error('Gerentes só podem criar usuários com papel ROLE_INSPECTOR ou ROLE_VIEWER.');
+    }
+  }
+
+  // 2. Validar Papel Alvo
+  const validRoles = new Set(['ROLE_SUPER_ADMIN', 'ROLE_MANAGER', 'ROLE_INSPECTOR', 'ROLE_VIEWER']);
+  const finalRole = requestedRole.trim();
+  if (!validRoles.has(finalRole)) {
+    throw new Error(`Papel inválido ou não reconhecido: ${finalRole}`);
+  }
+
+  // 3. Normalização de Nomes e Geração Canônica do Login Alias com Colisão Controlada
+  const normFirst = normalizeText(firstName || 'usuario');
+  const normLast = normalizeText(lastName || 'teste');
+  const cleanSlug = normalizeText(companySlug || 'yzzy');
+  const baseAlias = `${normFirst}.${normLast}@${cleanSlug}.yzzy`;
+
+  let finalLoginAlias = baseAlias;
+  let collisionCounter = 2;
+
+  while (collisionCounter < 100) {
+    const { data: exists } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
+      p_login_alias: finalLoginAlias,
+    });
+
+    if (!exists || exists.length === 0) {
+      break;
+    }
+    finalLoginAlias = `${normFirst}.${normLast}${collisionCounter}@${cleanSlug}.yzzy`;
+    collisionCounter++;
+  }
+
+  // 4. Geração Canônica de Auth Email Interno e Senha Temporária
+  const tempPassword = generateTempPassword();
+  const internalAuthEmail = `usr_${crypto.randomUUID().replace(/-/g, '')}@auth.yzzy.internal`;
+  const fullName = `${firstName.trim()} ${lastName.trim()}`;
+
+  let createdAuthUserId: string | null = null;
+  let createdProfile = false;
+
+  try {
+    // 5. Criar no Supabase Auth
+    const { data: authCreated, error: authErr } = await supabaseAdmin.auth.admin.createUser({
+      email: internalAuthEmail,
+      password: tempPassword,
+      email_confirm: true,
+      user_metadata: { full_name: fullName },
+    });
+
+    if (authErr || !authCreated?.user) {
+      throw new Error(`Falha ao criar usuário no Supabase Auth: ${authErr?.message}`);
+    }
+
+    createdAuthUserId = authCreated.user.id;
+    console.log(`[CID:${correlationId}] [AUTH_USER_CREATED] AuthUserId: ${createdAuthUserId} | AuthEmail: ${maskEmail(internalAuthEmail)}`);
+
+    // 6. Criar Perfil em public.profiles
+    const { error: profErr } = await supabaseAdmin.from('profiles').insert({
+      id: createdAuthUserId,
+      company_id: targetCompanyId,
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      full_name: fullName,
+      display_name: fullName,
+      username: finalLoginAlias.split('@')[0],
+      role: finalRole,
+      active: true,
+      must_change_password: true,
+    });
+
+    if (profErr) {
+      throw new Error(`Falha ao criar perfil em public.profiles: ${profErr.message}`);
+    }
+
+    createdProfile = true;
+    console.log(`[CID:${correlationId}] [PROFILE_CREATED] Profile ID: ${createdAuthUserId} | Role: ${finalRole}`);
+
+    // 7. Registrar Identidade no schema private via RPC Segura
+    const { data: identityData, error: idErr } = await supabaseAdmin.rpc('admin_register_user_auth_identity', {
+      p_user_id: createdAuthUserId,
+      p_company_id: targetCompanyId,
+      p_login_alias: finalLoginAlias,
+      p_auth_email: internalAuthEmail,
+    });
+
+    if (idErr || !identityData?.success) {
+      throw new Error(`Falha ao registrar identidade no schema private: ${idErr?.message || 'Erro na RPC'}`);
+    }
+
+    console.log(`[CID:${correlationId}] [IDENTITY_CREATED] Alias: ${finalLoginAlias} | AuthEmail: ${maskEmail(internalAuthEmail)}`);
+
+    // 8. Validação de Integridade Final
+    const { data: verifyRows, error: verifyErr } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
+      p_login_alias: finalLoginAlias,
+    });
+
+    if (verifyErr || !verifyRows || verifyRows.length === 0) {
+      throw new Error('Falha na validação pós-provisionamento da identidade.');
+    }
+
+    console.log(`[CID:${correlationId}] [USER_PROVISION_VALIDATED] Integridade 100% confirmada.`);
+
+    // 9. Registrar Auditoria
+    await supabaseAdmin.from('security_audit_logs').insert({
+      company_id: targetCompanyId,
+      user_id: actorUserId,
+      event_type: 'USER_PROVISIONED',
+      ip_address: clientIp || null,
+      metadata: {
+        created_user_id: createdAuthUserId,
+        login_alias: finalLoginAlias,
+        role: finalRole,
+        correlation_id: correlationId,
+      },
+    });
+
+    console.log(`[CID:${correlationId}] [USER_PROVISION_SUCCESS] Usuário ${finalLoginAlias} provisionado com sucesso.`);
+
+    return {
+      userId: createdAuthUserId,
+      loginAlias: finalLoginAlias,
+      authEmail: internalAuthEmail,
+      tempPassword,
+      fullName,
+      role: finalRole,
+      companyId: targetCompanyId,
+    };
+  } catch (err: unknown) {
+    console.error(`[CID:${correlationId}] [USER_PROVISION_ROLLBACK] Revertendo alterações devido a falha:`, err instanceof Error ? err.message : err);
+
+    // Rollback / Compensação Completa
+    if (createdProfile && createdAuthUserId) {
+      await supabaseAdmin.from('profiles').delete().eq('id', createdAuthUserId).catch(() => {});
+    }
+    if (createdAuthUserId) {
+      await supabaseAdmin.auth.admin.deleteUser(createdAuthUserId).catch(() => {});
+    }
+
+    throw err;
+  }
 }
 
 serve(async (req: Request) => {
@@ -122,7 +313,7 @@ serve(async (req: Request) => {
     let callerUser: { id: string; email?: string } | null = null;
     let authErrorMessage = '';
 
-    // Estratégia 1: Cliente oficial com ANON_KEY e Bearer header (padrão oficial Supabase Edge Functions)
+    // Estratégia 1: Cliente oficial com ANON_KEY e Bearer header
     if (anonKey) {
       try {
         const userClient = createClient(supabaseUrl, anonKey, {
@@ -195,7 +386,7 @@ serve(async (req: Request) => {
     console.log(`[CID:${correlationId}] [TOKEN_VALID] Token validado com sucesso via GoTrue. UID: ${callerUser.id}`);
     console.log(`[CID:${correlationId}] [USER_RESOLVED] Caller User: ${callerUser.id} | Email: ${maskEmail(callerUser.email)}`);
 
-    // 3. Consultar perfil e permissões no banco de dados (server-side pelo UUID autenticado)
+    // 3. Consultar perfil e permissões no banco de dados
     const { data: callerProfile, error: callerProfErr } = await supabaseAdmin
       .from('profiles')
       .select('id, company_id, role, active')
@@ -225,6 +416,7 @@ serve(async (req: Request) => {
 
     const body = await req.json();
     const { action } = body;
+    const clientIp = req.headers.get('x-forwarded-for') || null;
 
     // =========================================================================
     // AÇÃO 0: AUDITORIA / CHECK DE SESSÃO AUTENTICADA
@@ -250,7 +442,7 @@ serve(async (req: Request) => {
     }
 
     // =========================================================================
-    // AÇÃO 1: SUPER_ADMIN — Criar nova empresa e primeiro gerente
+    // AÇÃO 1: SUPER_ADMIN — Criar nova empresa e primeiro gerente (Canônico)
     // =========================================================================
     if (action === 'create_company') {
       if (!isSuperAdmin) {
@@ -311,80 +503,27 @@ serve(async (req: Request) => {
 
       let managerInfo = null;
 
-      // Criar primeiro gerente caso informado (provisionamento atômico)
+      // Provisionar primeiro gerente usando o SERVIÇO CANÔNICO
       if (managerFirstName && managerLastName) {
-        const normFirst = normalizeText(managerFirstName);
-        const normLast = normalizeText(managerLastName);
-        const loginAlias = `${normFirst}.${normLast}@${cleanSlug}.yzzy`;
-        const tempPassword = generateTempPassword();
-        const authEmail = `mgr_${newCompany.id.replace(/-/g, '')}@auth.yzzy.internal`;
-
-        console.log(`[CID:${correlationId}] [CREATE_MANAGER_STARTED] Alias: ${loginAlias} | AuthEmail: ${maskEmail(authEmail)}`);
-
-        // 1. Criar no Supabase Auth
-        const { data: authCreated, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-          email: authEmail,
-          password: tempPassword,
-          email_confirm: true,
-          user_metadata: { full_name: `${managerFirstName} ${managerLastName}` },
-        });
-
-        if (authErr || !authCreated?.user) {
-          console.error(`[CID:${correlationId}] [CREATE_MANAGER_AUTH_FAILED] Erro ao criar Auth User: ${authErr?.message}`);
-          return new Response(
-            JSON.stringify({ success: false, error: `Erro ao provisionar autenticação do gerente: ${authErr?.message}` }),
-            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
-          );
-        }
-
-        const managerId = authCreated.user.id;
-
-        // 2. Inserir Profile
-        const { error: profErr } = await supabaseAdmin.from('profiles').insert({
-          id: managerId,
-          company_id: newCompany.id,
-          first_name: managerFirstName,
-          last_name: managerLastName,
-          display_name: `${managerFirstName} ${managerLastName}`,
-          username: `${normFirst}.${normLast}`,
+        const provisionedManager = await provision_yzzy_user(supabaseAdmin, {
+          actorUserId: callerUser.id,
+          actorRole: callerProfile.role,
+          actorCompanyId: null,
+          targetCompanyId: newCompany.id,
+          companySlug: cleanSlug,
+          firstName: managerFirstName,
+          lastName: managerLastName,
           role: 'ROLE_MANAGER',
-          active: true,
-          must_change_password: true,
+          correlationId,
+          clientIp,
         });
-
-        if (profErr) {
-          console.error(`[CID:${correlationId}] [CREATE_MANAGER_PROFILE_FAILED] Erro no perfil: ${profErr.message}`);
-          await supabaseAdmin.auth.admin.deleteUser(managerId);
-          return new Response(
-            JSON.stringify({ success: false, error: `Erro ao criar perfil do gerente: ${profErr.message}` }),
-            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
-          );
-        }
-
-        // 3. Registrar Identidade no schema private via RPC segura
-        const { data: identityData, error: idErr } = await supabaseAdmin.rpc('admin_register_user_auth_identity', {
-          p_user_id: managerId,
-          p_company_id: newCompany.id,
-          p_login_alias: loginAlias,
-          p_auth_email: authEmail,
-        });
-
-        if (idErr || !identityData?.success) {
-          console.error(`[CID:${correlationId}] [CREATE_MANAGER_IDENTITY_FAILED] Erro na identidade: ${idErr?.message || 'Falha no registro'}`);
-          await supabaseAdmin.from('profiles').delete().eq('id', managerId);
-          await supabaseAdmin.auth.admin.deleteUser(managerId);
-          return new Response(
-            JSON.stringify({ success: false, error: `Erro ao registrar Login YZZY do gerente: ${idErr?.message || 'Falha na identidade'}` }),
-            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
-          );
-        }
 
         managerInfo = {
-          loginAlias,
-          tempPassword,
-          fullName: `${managerFirstName} ${managerLastName}`,
+          userId: provisionedManager.userId,
+          loginAlias: provisionedManager.loginAlias,
+          tempPassword: provisionedManager.tempPassword,
+          fullName: provisionedManager.fullName,
         };
-        console.log(`[CID:${correlationId}] [CREATE_MANAGER_SUCCESS] Gerente provisionado com sucesso: ${managerId} | Alias: ${loginAlias}`);
       }
 
       // Log de Auditoria
@@ -392,7 +531,7 @@ serve(async (req: Request) => {
         company_id: newCompany.id,
         user_id: callerUser.id,
         event_type: 'COMPANY_CREATED',
-        ip_address: req.headers.get('x-forwarded-for') || null,
+        ip_address: clientIp,
         metadata: { company_id: newCompany.id, company_name: name, correlation_id: correlationId },
       });
 
@@ -403,10 +542,20 @@ serve(async (req: Request) => {
     }
 
     // =========================================================================
-    // AÇÃO 2: COMPANY_MANAGER / SUPER_ADMIN — Cadastrar funcionário
+    // AÇÃO 2: COMPANY_MANAGER / SUPER_ADMIN — Cadastrar colaborador (Canônico)
     // =========================================================================
     if (action === 'create_employee') {
-      const targetCompanyId = isSuperAdmin ? body.companyId : callerProfile.company_id;
+      const requestedCompanyId = body.companyId || body.targetCompanyId;
+
+      // Se não for Super Admin e tentar especificar outra empresa, bloqueia com HTTP 403
+      if (!isSuperAdmin && requestedCompanyId && requestedCompanyId !== callerProfile.company_id) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Acesso negado. Não é permitido criar usuários em outra empresa.' }),
+          { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const targetCompanyId = isSuperAdmin ? requestedCompanyId : callerProfile.company_id;
 
       if (!targetCompanyId) {
         return new Response(
@@ -437,112 +586,42 @@ serve(async (req: Request) => {
         );
       }
 
-      // Se o criador for Gerente, só pode criar Vistoriador ou Visualizador
+      // Validação de Role
       let targetRole = role || 'ROLE_INSPECTOR';
       if (!isSuperAdmin) {
-        if (targetRole !== 'ROLE_INSPECTOR' && targetRole !== 'ROLE_VIEWER') {
-          targetRole = 'ROLE_INSPECTOR';
+        if (targetRole === 'ROLE_SUPER_ADMIN' || targetRole === 'ROLE_MANAGER') {
+          return new Response(
+            JSON.stringify({ success: false, error: 'Gerentes só podem criar usuários com papel ROLE_INSPECTOR ou ROLE_VIEWER.' }),
+            { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+          );
         }
       }
 
-      const normFirst = normalizeText(firstName || 'usuario');
-      const normLast = normalizeText(lastName || 'teste');
-      const baseAlias = `${normFirst}.${normLast}@${comp.slug}.yzzy`;
-
-      // Tratamento determinístico de colisão de Login YZZY com retry
-      let finalLoginAlias = baseAlias;
-      let counter = 2;
-
-      while (counter < 100) {
-        const { data: exists } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
-          p_login_alias: finalLoginAlias,
-        });
-
-        if (!exists || exists.length === 0) break;
-        finalLoginAlias = `${normFirst}.${normLast}${counter}@${comp.slug}.yzzy`;
-        counter++;
-      }
-
-      const tempPassword = generateTempPassword();
-      const internalAuthEmail = `usr_${crypto.randomUUID().replace(/-/g, '')}@auth.yzzy.internal`;
-      const fullName = `${firstName.trim()} ${lastName.trim()}`;
-
-      // Criar no Supabase Auth
-      const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-        email: internalAuthEmail,
-        password: tempPassword,
-        email_confirm: true,
-        user_metadata: { full_name: fullName },
-      });
-
-      if (authErr || !authUser?.user) {
-        return new Response(
-          JSON.stringify({ success: false, error: `Erro no Supabase Auth: ${authErr?.message}` }),
-          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const newUserId = authUser.user.id;
-
-      // Inserir Profile
-      const { error: profErr } = await supabaseAdmin.from('profiles').insert({
-        id: newUserId,
-        company_id: targetCompanyId,
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        display_name: fullName,
-        username: finalLoginAlias.split('@')[0],
+      // Executar Provisionamento via SERVIÇO CANÔNICO
+      const provisioned = await provision_yzzy_user(supabaseAdmin, {
+        actorUserId: callerUser.id,
+        actorRole: callerProfile.role,
+        actorCompanyId: callerProfile.company_id,
+        targetCompanyId,
+        companySlug: comp.slug,
+        firstName,
+        lastName,
         role: targetRole,
-        active: true,
-        must_change_password: true,
-      });
-
-      if (profErr) {
-        await supabaseAdmin.auth.admin.deleteUser(newUserId);
-        return new Response(
-          JSON.stringify({ success: false, error: `Erro ao criar perfil: ${profErr.message}` }),
-          { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      // Inserir Identidade no schema private via RPC segura
-      const { data: identityData, error: idErr } = await supabaseAdmin.rpc('admin_register_user_auth_identity', {
-        p_user_id: newUserId,
-        p_company_id: targetCompanyId,
-        p_login_alias: finalLoginAlias,
-        p_auth_email: internalAuthEmail,
-      });
-
-      if (idErr || !identityData?.success) {
-        console.error(`[CID:${correlationId}] [CREATE_EMPLOYEE_IDENTITY_FAILED] Erro na identidade: ${idErr?.message}`);
-        await supabaseAdmin.from('profiles').delete().eq('id', newUserId);
-        await supabaseAdmin.auth.admin.deleteUser(newUserId);
-        return new Response(
-          JSON.stringify({ success: false, error: `Erro ao registrar Login YZZY do funcionário: ${idErr?.message}` }),
-          { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      // Log de Auditoria
-      await supabaseAdmin.from('security_audit_logs').insert({
-        company_id: targetCompanyId,
-        user_id: callerUser.id,
-        event_type: 'USER_CREATED',
-        ip_address: req.headers.get('x-forwarded-for') || null,
-        metadata: { created_user_id: newUserId, login_alias: finalLoginAlias, role: targetRole, correlation_id: correlationId },
+        correlationId,
+        clientIp,
       });
 
       return new Response(
         JSON.stringify({
           success: true,
           correlationId,
-          loginAlias: finalLoginAlias,
-          tempPassword,
+          loginAlias: provisioned.loginAlias,
+          tempPassword: provisioned.tempPassword,
           user: {
-            id: newUserId,
-            fullName,
-            role: targetRole,
-            companyId: targetCompanyId,
+            id: provisioned.userId,
+            fullName: provisioned.fullName,
+            role: provisioned.role,
+            companyId: provisioned.companyId,
           },
         }),
         { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -582,7 +661,7 @@ serve(async (req: Request) => {
         company_id: targetProf.company_id,
         user_id: callerUser.id,
         event_type: active ? 'USER_ENABLED' : 'USER_DISABLED',
-        ip_address: req.headers.get('x-forwarded-for') || null,
+        ip_address: clientIp,
         metadata: { target_user_id: targetUserId, correlation_id: correlationId },
       });
 
@@ -632,7 +711,7 @@ serve(async (req: Request) => {
         company_id: targetProf.company_id,
         user_id: callerUser.id,
         event_type: 'ROLE_CHANGED',
-        ip_address: req.headers.get('x-forwarded-for') || null,
+        ip_address: clientIp,
         metadata: { target_user_id: targetUserId, old_role: targetProf.role, new_role: newRole, correlation_id: correlationId },
       });
 
@@ -650,7 +729,7 @@ serve(async (req: Request) => {
     const msg = err instanceof Error ? err.message : 'Erro interno.';
     console.error(`[CID:${correlationId}] [ERRO admin-manage-user]:`, msg);
     return new Response(
-      JSON.stringify({ success: false, error: 'Erro ao processar solicitação administrativa.' }),
+      JSON.stringify({ success: false, error: msg || 'Erro ao processar solicitação administrativa.' }),
       { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
     );
   }

@@ -3,22 +3,19 @@ import {
   X, 
   Users, 
   UserPlus, 
-  Trash2, 
-  Shield, 
-  Check, 
   Loader2,
-  Key,
+  Copy,
+  Check,
   ToggleLeft,
   ToggleRight
 } from 'lucide-react';
-import type { AuthUser, AuthSession, UserRole } from '../types/auth';
+import type { UserProfile, AuthSession, UserRole } from '../types/auth';
 import { 
-  fetchCompanyUsers, 
-  createCompanyUser, 
-  deleteCompanyUser,
-  updateCompanyUserPassword,
-  toggleCompanyUserActive
-} from '../services/authService';
+  fetchEmployees, 
+  adminCreateEmployee, 
+  adminToggleUserStatus,
+  adminChangeUserRole
+} from '../services/auth';
 import { useToast } from './Toast';
 
 interface UserManagementModalProps {
@@ -33,38 +30,38 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
   currentSession,
 }) => {
   const { showToast } = useToast();
-  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form State
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [role, setRole] = useState<UserRole>('ROLE_INSPECTOR');
-  const [password, setPassword] = useState('');
-
-  // Password reset modal state
-  const [passwordResetUserId, setPasswordResetUserId] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [createdResult, setCreatedResult] = useState<{
+    loginAlias: string;
+    tempPassword: string;
+    fullName: string;
+  } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loadUsers = useCallback(async () => {
-    if (!currentSession.company?.id) return;
     setIsLoading(true);
     try {
-      const list = await fetchCompanyUsers(currentSession.company.id);
+      const list = await fetchEmployees();
       setUsers(list);
     } catch (e) {
       console.warn('Erro ao listar usuários:', e);
     } finally {
       setIsLoading(false);
     }
-  }, [currentSession.company?.id]);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
       loadUsers();
+      setCreatedResult(null);
     }
   }, [isOpen, loadUsers]);
 
@@ -72,35 +69,28 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim() || !username.trim() || !password.trim()) {
-      showToast('Preencha Nome Completo, Usuário e Senha.', 'error');
-      return;
-    }
-
-    if (password.trim().length < 6) {
-      showToast('A senha deve ter no mínimo 6 caracteres.', 'error');
-      return;
-    }
-
-    if (!currentSession.company?.id) {
-      showToast('Empresa não selecionada.', 'error');
+    if (!firstName.trim() || !lastName.trim()) {
+      showToast('Preencha Nome e Sobrenome.', 'error');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const res = await createCompanyUser(currentSession.company.id, {
-        fullName: fullName.trim(),
-        username: username.trim().toLowerCase(),
+      const res = await adminCreateEmployee({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         role,
-        password: password.trim(),
       });
 
       if (res.success && res.data) {
-        showToast(`Colaborador ${res.data.fullName} cadastrado com sucesso!`, 'success');
-        setFullName('');
-        setUsername('');
-        setPassword('');
+        showToast(`Colaborador ${res.data.user.fullName} cadastrado com sucesso!`, 'success');
+        setCreatedResult({
+          loginAlias: res.data.loginAlias,
+          tempPassword: res.data.tempPassword,
+          fullName: res.data.user.fullName,
+        });
+        setFirstName('');
+        setLastName('');
         setIsCreating(false);
         await loadUsers();
       } else {
@@ -114,7 +104,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
     }
   };
 
-  const handleToggleActive = async (userToToggle: AuthUser) => {
+  const handleToggleActive = async (userToToggle: UserProfile) => {
     if (userToToggle.id === currentSession.user.id) {
       showToast('Você não pode desativar seu próprio usuário logado.', 'error');
       return;
@@ -122,7 +112,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
     const nextActive = !userToToggle.active;
     try {
-      const res = await toggleCompanyUserActive(userToToggle.id, nextActive);
+      const res = await adminToggleUserStatus(userToToggle.id, nextActive);
       if (res.success) {
         showToast(
           `Usuário ${userToToggle.fullName} ${nextActive ? 'ativado' : 'desativado'}.`,
@@ -137,65 +127,47 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
     }
   };
 
-  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!passwordResetUserId || newPassword.trim().length < 6) {
-      showToast('A nova senha deve ter no mínimo 6 caracteres.', 'error');
+  const handleChangeRole = async (userItem: UserProfile, newRole: UserRole) => {
+    if (userItem.id === currentSession.user.id) {
+      showToast('Você não pode alterar seu próprio cargo.', 'error');
       return;
     }
 
-    setIsResettingPassword(true);
     try {
-      const res = await updateCompanyUserPassword(passwordResetUserId, newPassword.trim());
+      const res = await adminChangeUserRole(userItem.id, newRole);
       if (res.success) {
-        showToast('Senha redefinida com sucesso!', 'success');
-        setPasswordResetUserId(null);
-        setNewPassword('');
-      } else {
-        showToast(res.error || 'Erro ao redefinir senha.', 'error');
-      }
-    } catch {
-      showToast('Falha ao redefinir senha.', 'error');
-    } finally {
-      setIsResettingPassword(false);
-    }
-  };
-
-  const handleDeleteUser = async (userToDelete: AuthUser) => {
-    if (userToDelete.id === currentSession.user.id) {
-      showToast('Você não pode excluir o seu próprio usuário logado.', 'error');
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Deseja realmente remover o acesso de "${userToDelete.fullName}"? Essa ação não pode ser desfeita.`
-    );
-    if (!confirmed) return;
-
-    try {
-      const res = await deleteCompanyUser(userToDelete.id);
-      if (res.success) {
-        showToast(`Usuário ${userToDelete.fullName} removido com sucesso.`, 'info');
+        showToast(`Cargo de ${userItem.fullName} atualizado para ${newRole}.`, 'info');
         await loadUsers();
       } else {
-        showToast(res.error || 'Erro ao excluir usuário.', 'error');
+        showToast(res.error || 'Erro ao alterar cargo.', 'error');
       }
     } catch {
-      showToast('Não foi possível excluir o usuário.', 'error');
+      showToast('Erro de comunicação ao alterar cargo.', 'error');
     }
   };
 
   const getRoleBadge = (userRole: UserRole) => {
     switch (userRole) {
+      case 'ROLE_SUPER_ADMIN':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Super Admin</span>;
       case 'ROLE_MANAGER':
         return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">Gerente</span>;
       case 'ROLE_INSPECTOR':
-        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-50 text-brand-700 border border-brand-200">Vistoriador</span>;
-      case 'ROLE_ADMIN_VIEWER':
-        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">Administrativo</span>;
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">Vistoriador</span>;
+      case 'ROLE_VIEWER':
+        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">Visualizador</span>;
       default:
         return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">Usuário</span>;
     }
+  };
+
+  const copyCredentials = () => {
+    if (!createdResult) return;
+    const text = `Acesso Vistoria YZZY:\nLogin: ${createdResult.loginAlias}\nSenha Temporária: ${createdResult.tempPassword}\nLink: https://vistoriayzzy.vercel.app`;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    showToast('Credenciais copiadas!', 'info');
+    setTimeout(() => setCopied(false), 3000);
   };
 
   return (
@@ -229,6 +201,33 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
         {/* Modal Content */}
         <div className="p-5 sm:px-6 py-5 space-y-6">
 
+          {/* Credenciais Geradas */}
+          {createdResult && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-800">✅ Novo Colaborador Provisionado</span>
+                <button
+                  type="button"
+                  onClick={copyCredentials}
+                  className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100/80 hover:bg-emerald-200 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? 'Copiado!' : 'Copiar Acesso'}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-100">
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Login YZZY</span>
+                  <span className="font-mono font-bold text-slate-800">{createdResult.loginAlias}</span>
+                </div>
+                <div className="bg-white p-2.5 rounded-xl border border-emerald-100">
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Senha Temporária</span>
+                  <span className="font-mono font-bold text-emerald-600">{createdResult.tempPassword}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Action Bar */}
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
@@ -243,248 +242,156 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
               className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-xs shadow-sm transition-all active:scale-95 ${
                 isCreating 
                   ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
-                  : 'bg-brand-600 hover:bg-brand-700 text-white shadow-brand-600/25'
+                  : 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/25'
               }`}
             >
               {isCreating ? (
                 <>
-                  <X className="w-3.5 h-3.5" />
-                  <span>Cancelar</span>
+                  <X className="w-4 h-4" /> Cancelar
                 </>
               ) : (
                 <>
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>+ Criar Novo Login</span>
+                  <UserPlus className="w-4 h-4" /> Adicionar Colaborador
                 </>
               )}
             </button>
           </div>
 
-          {/* Form: Create User */}
+          {/* Form de Criação */}
           {isCreating && (
-            <form onSubmit={handleCreateUser} className="bg-brand-50/50 border border-brand-200/80 rounded-2xl p-4 sm:p-5 space-y-4 animate-fadeIn">
-              <div className="flex items-center gap-2 text-brand-800 font-bold text-xs border-b border-brand-200/60 pb-2">
-                <UserPlus className="w-4 h-4 text-brand-600" />
-                <span>Cadastrar Novo Colaborador na {currentSession.company?.name || 'Empresa'}</span>
-              </div>
+            <form onSubmit={handleCreateUser} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Novo Colaborador (Provisionamento Canônico)
+              </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                {/* Nome Completo */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Nome Completo *</label>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">Nome *</label>
                   <input
                     type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Ex: Carlos Eduardo Silva"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:border-brand-500"
                     required
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="Ex: Maria"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
-
-                {/* Nome de Usuário / Login */}
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Nome de Usuário (Login) *</label>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">Sobrenome *</label>
                   <input
                     type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value.toLowerCase().trim())}
-                    placeholder="Ex: carlos.silva"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-medium focus:outline-none focus:border-brand-500 lowercase"
                     required
-                  />
-                </div>
-
-                {/* Perfil / Cargo */}
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Cargo / Permissão (Role) *</label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-medium focus:outline-none focus:border-brand-500"
-                  >
-                    <option value="ROLE_INSPECTOR">Vistoriador (ROLE_INSPECTOR - Cria e edita vistorias)</option>
-                    <option value="ROLE_ADMIN_VIEWER">Administrativo (ROLE_ADMIN_VIEWER - Visualiza laudos)</option>
-                    <option value="ROLE_MANAGER">Gerente (ROLE_MANAGER - Acesso total e gestão da equipe)</option>
-                  </select>
-                </div>
-
-                {/* Senha Inicial */}
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Senha de Acesso Inicial (min. 6 dígitos) *</label>
-                  <input
-                    type="text"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:border-brand-500"
-                    required
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Ex: Silva"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end pt-2">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-md shadow-brand-600/25 transition-all disabled:opacity-50"
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">Função (Role)</label>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as UserRole)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
                 >
-                  {isSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>Salvar e Cadastrar</span>
-                    </>
-                  )}
-                </button>
+                  <option value="ROLE_INSPECTOR">Vistoriador (ROLE_INSPECTOR)</option>
+                  <option value="ROLE_VIEWER">Visualizador (ROLE_VIEWER)</option>
+                </select>
               </div>
-            </form>
-          )}
 
-          {/* Form: Password Reset Box */}
-          {passwordResetUserId && (
-            <form onSubmit={handleResetPasswordSubmit} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-amber-800 font-bold text-xs">
-                  <Key className="w-4 h-4 text-amber-600" />
-                  <span>Redefinir Senha do Colaborador</span>
-                </div>
-                <button 
-                  type="button" 
-                  onClick={() => { setPasswordResetUserId(null); setNewPassword(''); }}
-                  className="text-xs text-amber-700 hover:text-amber-900 font-semibold"
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreating(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
                 >
                   Cancelar
                 </button>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Nova senha (mínimo 6 caracteres)"
-                  className="flex-1 bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
-                  required
-                />
                 <button
                   type="submit"
-                  disabled={isResettingPassword}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-md transition-all disabled:opacity-50"
                 >
-                  {isResettingPassword ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                  <span>Atualizar Senha</span>
+                  {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Provisionar Usuário
                 </button>
               </div>
             </form>
           )}
 
-          {/* Users List Table */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden shadow-inner">
+          {/* Listagem de Usuários */}
+          <div className="space-y-2">
             {isLoading ? (
-              <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
-                <Loader2 className="w-6 h-6 animate-spin text-brand-600" />
-                <span className="text-xs font-semibold">Carregando colaboradores da empresa...</span>
+              <div className="py-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Carregando colaboradores...
               </div>
             ) : users.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 text-xs">
-                Nenhum colaborador encontrado nesta empresa.
+              <div className="py-8 text-center text-slate-400 text-xs">
+                Nenhum colaborador cadastrado ainda.
               </div>
             ) : (
-              <div className="divide-y divide-slate-200">
-                {users.map((u) => (
-                  <div 
-                    key={u.id}
-                    className={`p-4 flex items-center justify-between gap-3 transition-colors ${
-                      u.active ? 'hover:bg-white' : 'bg-slate-100/70 opacity-75'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs shadow-sm ${
-                        u.active 
-                          ? 'bg-white border-slate-200 text-slate-700' 
-                          : 'bg-slate-200 border-slate-300 text-slate-400'
-                      }`}>
-                        {u.fullName.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className={`font-bold text-xs sm:text-sm ${
-                            u.active ? 'text-slate-900' : 'text-slate-500 line-through'
-                          }`}>
-                            {u.fullName}
-                          </span>
-                          {getRoleBadge(u.role)}
-                          {!u.active && (
-                            <span className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-full border border-rose-200">
-                              Desativado
-                            </span>
-                          )}
-                          {u.id === currentSession.user.id && (
-                            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">
-                              Você
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                          <span>Login: <code className="font-mono text-slate-700 font-bold">{u.username}</code></span>
-                        </p>
-                      </div>
+              users.map((u) => (
+                <div 
+                  key={u.id}
+                  className="p-3 bg-white border border-slate-200 hover:border-slate-300 rounded-2xl flex items-center justify-between gap-3 transition-all"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 font-bold text-xs">
+                      {u.fullName.charAt(0)}
                     </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1">
-                      {/* Redefinir Senha */}
-                      <button
-                        onClick={() => {
-                          setPasswordResetUserId(u.id);
-                          setNewPassword('');
-                        }}
-                        className="p-2 rounded-xl text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                        title="Redefinir senha deste usuário"
-                      >
-                        <Key className="w-4 h-4" />
-                      </button>
-
-                      {/* Ativar/Desativar (não pode em si próprio) */}
-                      {u.id !== currentSession.user.id && (
-                        <button
-                          onClick={() => handleToggleActive(u)}
-                          className={`p-2 rounded-xl transition-colors ${
-                            u.active 
-                              ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' 
-                              : 'text-emerald-600 hover:bg-emerald-50'
-                          }`}
-                          title={u.active ? 'Desativar acesso' : 'Reativar acesso'}
-                        >
-                          {u.active ? <ToggleRight className="w-5 h-5 text-emerald-600" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
-                        </button>
-                      )}
-
-                      {/* Excluir Colaborador (não pode excluir a si próprio) */}
-                      {u.id !== currentSession.user.id && (
-                        <button
-                          onClick={() => handleDeleteUser(u)}
-                          className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                          title="Excluir permanentemente"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-900 truncate">
+                          {u.fullName}
+                        </span>
+                        {getRoleBadge(u.role)}
+                        {!u.active && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                            Inativo
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-slate-400 font-mono truncate block">
+                        @{u.username}
+                      </span>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Rodapé de Instrução */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-start gap-3">
-            <Shield className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-slate-600 leading-relaxed">
-              <strong>Como o novo colaborador entra:</strong> No login, ele informará o código da empresa (<strong>{currentSession.company?.slug || 'empresa'}</strong>), o <strong>Nome de Usuário</strong> e a <strong>Senha</strong> cadastrados aqui.
-            </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Alterar Role */}
+                    {u.id !== currentSession.user.id && (
+                      <select
+                        value={u.role}
+                        onChange={(e) => handleChangeRole(u, e.target.value as UserRole)}
+                        className="text-[11px] font-semibold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-700 focus:outline-none"
+                      >
+                        <option value="ROLE_INSPECTOR">Vistoriador</option>
+                        <option value="ROLE_VIEWER">Visualizador</option>
+                      </select>
+                    )}
+
+                    {/* Toggle Ativo / Inativo */}
+                    {u.id !== currentSession.user.id && (
+                      <button
+                        onClick={() => handleToggleActive(u)}
+                        title={u.active ? 'Desativar usuário' : 'Ativar usuário'}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          u.active ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'
+                        }`}
+                      >
+                        {u.active ? (
+                          <ToggleRight className="w-5 h-5" />
+                        ) : (
+                          <ToggleLeft className="w-5 h-5" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
         </div>

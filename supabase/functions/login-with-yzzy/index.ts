@@ -1,8 +1,8 @@
 // ==============================================================================
-// SUPABASE EDGE FUNCTION: login-with-yzzy (ETAPA 02.1 — HARDENING COMPLETO)
+// SUPABASE EDGE FUNCTION: login-with-yzzy (FLUXO CANÔNICO DE AUTENTICAÇÃO)
 // ==============================================================================
 // Endpoint de login baseado no identificador Login YZZY (nome.sobrenome@empresa.yzzy)
-// Implementa Rate Limiting duplo por IP e Identificador, anti-enumeração e auditoria segura
+// Implementa Rate Limiting duplo, resolução 100% read-only, anti-enumeração e observabilidade
 // ==============================================================================
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -53,7 +53,7 @@ serve(async (req: Request) => {
     );
   }
 
-  // 1. Limitação de Tamanho de Payload (Max 4KB para evitar ataques de estouro)
+  // 1. Limitação de Tamanho de Payload
   const rawBody = await req.text();
   if (rawBody.length > 4096) {
     return new Response(
@@ -63,7 +63,7 @@ serve(async (req: Request) => {
   }
 
   const correlationId = crypto.randomUUID();
-  const AUTH_FUNCTION_VERSION = '2026-09-09-v4-identity-fixed';
+  const AUTH_FUNCTION_VERSION = '2026-09-10-v5-canonical';
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -112,7 +112,7 @@ serve(async (req: Request) => {
     const ipRateLimitKey = `ip:${clientIp}`;
     const loginRateLimitKey = `login:${cleanLogin}`;
 
-    // 2. Rate Limiting por IP (Max 10 tentativas a cada 5 min, lock de 15 min)
+    // 2. Rate Limiting por IP (Max 10 tentativas / 5 min, lock 15 min)
     const { data: ipLimitData } = await supabaseAdmin.rpc('check_and_record_login_attempt', {
       p_identifier: ipRateLimitKey,
       p_max_attempts: 10,
@@ -140,7 +140,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // 3. Rate Limiting por Login Específico (Max 5 tentativas a cada 5 min, lock de 15 min)
+    // 3. Rate Limiting por Login Específico (Max 5 tentativas / 5 min, lock 15 min)
     const { data: loginLimitData } = await supabaseAdmin.rpc('check_and_record_login_attempt', {
       p_identifier: loginRateLimitKey,
       p_max_attempts: 5,
@@ -186,7 +186,7 @@ serve(async (req: Request) => {
         metadata: { login_attempt: cleanLogin, correlation_id: correlationId, reason: 'identity_not_found' },
       });
 
-      // NÃO realizar fallback para o alias literal — abortar imediatamente com erro seguro
+      // Abortar imediatamente com erro 401 seguro
       return new Response(
         JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
@@ -197,9 +197,9 @@ serve(async (req: Request) => {
     const internalAuthEmail = identityUser.auth_email;
     const userId = identityUser.user_id;
 
-    console.log(`[CID:${correlationId}] [IDENTITY_FOUND] UserId: ${userId} | Role: ${identityUser.role} | Active: ${identityUser.active} | MustChangePass: ${identityUser.must_change_password} | AuthEmail: ${internalAuthEmail.split('@')[0]}***@${internalAuthEmail.split('@')[1] || ''}`);
+    console.log(`[CID:${correlationId}] [IDENTITY_FOUND] UserId: ${userId} | Role: ${identityUser.role} | Active: ${identityUser.active} | MustChangePass: ${identityUser.must_change_password}`);
 
-    // 5. Validar se o usuário e a empresa estão ativos
+    // 5. Validar Perfil e Empresa Ativos
     if (!identityUser.active) {
       console.warn(`[CID:${correlationId}] [USER_INACTIVE] Usuário ${userId} está desativado.`);
       return new Response(
@@ -208,12 +208,18 @@ serve(async (req: Request) => {
       );
     }
 
+    console.log(`[CID:${correlationId}] [PROFILE_VALID] Perfil ${userId} ativo com sucesso.`);
+
     if (identityUser.company_id && !identityUser.company_active) {
       console.warn(`[CID:${correlationId}] [COMPANY_INACTIVE] Empresa ${identityUser.company_id} está inativa.`);
       return new Response(
         JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
         { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
+    }
+
+    if (identityUser.company_id) {
+      console.log(`[CID:${correlationId}] [COMPANY_VALID] Empresa ${identityUser.company_id} ativa com sucesso.`);
     }
 
     // 6. Autenticação no Supabase Auth usando o email interno real
@@ -288,7 +294,7 @@ serve(async (req: Request) => {
       },
     };
 
-    console.log(`[CID:${correlationId}] [AUTH_COMPLETED_SUCCESS] Resposta HTTP 200 emitida com sucesso.`);
+    console.log(`[CID:${correlationId}] [LOGIN_COMPLETED] Resposta HTTP 200 emitida com sucesso.`);
 
     return new Response(
       JSON.stringify(responsePayload),
