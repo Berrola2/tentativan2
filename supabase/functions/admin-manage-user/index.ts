@@ -311,7 +311,7 @@ serve(async (req: Request) => {
 
       let managerInfo = null;
 
-      // Criar primeiro gerente caso informado
+      // Criar primeiro gerente caso informado (provisionamento atômico)
       if (managerFirstName && managerLastName) {
         const normFirst = normalizeText(managerFirstName);
         const normLast = normalizeText(managerLastName);
@@ -321,6 +321,7 @@ serve(async (req: Request) => {
 
         console.log(`[CID:${correlationId}] [CREATE_MANAGER_STARTED] Alias: ${loginAlias} | AuthEmail: ${maskEmail(authEmail)}`);
 
+        // 1. Criar no Supabase Auth
         const { data: authCreated, error: authErr } = await supabaseAdmin.auth.admin.createUser({
           email: authEmail,
           password: tempPassword,
@@ -328,36 +329,62 @@ serve(async (req: Request) => {
           user_metadata: { full_name: `${managerFirstName} ${managerLastName}` },
         });
 
-        if (!authErr && authCreated?.user) {
-          const managerId = authCreated.user.id;
-          await supabaseAdmin.from('profiles').insert({
-            id: managerId,
-            company_id: newCompany.id,
-            first_name: managerFirstName,
-            last_name: managerLastName,
-            display_name: `${managerFirstName} ${managerLastName}`,
-            username: `${normFirst}.${normLast}`,
-            role: 'ROLE_MANAGER',
-            active: true,
-            must_change_password: true,
-          });
-
-          await supabaseAdmin.schema('private').from('user_auth_identities').insert({
-            user_id: managerId,
-            company_id: newCompany.id,
-            login_alias: loginAlias,
-            auth_email: authEmail,
-          });
-
-          managerInfo = {
-            loginAlias,
-            tempPassword,
-            fullName: `${managerFirstName} ${managerLastName}`,
-          };
-          console.log(`[CID:${correlationId}] [CREATE_MANAGER_SUCCESS] Gerente criado com sucesso: ${managerId}`);
-        } else {
-          console.error(`[CID:${correlationId}] [CREATE_MANAGER_FAILED] Erro ao criar gerente: ${authErr?.message}`);
+        if (authErr || !authCreated?.user) {
+          console.error(`[CID:${correlationId}] [CREATE_MANAGER_AUTH_FAILED] Erro ao criar Auth User: ${authErr?.message}`);
+          return new Response(
+            JSON.stringify({ success: false, error: `Erro ao provisionar autenticação do gerente: ${authErr?.message}` }),
+            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
+          );
         }
+
+        const managerId = authCreated.user.id;
+
+        // 2. Inserir Profile
+        const { error: profErr } = await supabaseAdmin.from('profiles').insert({
+          id: managerId,
+          company_id: newCompany.id,
+          first_name: managerFirstName,
+          last_name: managerLastName,
+          display_name: `${managerFirstName} ${managerLastName}`,
+          username: `${normFirst}.${normLast}`,
+          role: 'ROLE_MANAGER',
+          active: true,
+          must_change_password: true,
+        });
+
+        if (profErr) {
+          console.error(`[CID:${correlationId}] [CREATE_MANAGER_PROFILE_FAILED] Erro no perfil: ${profErr.message}`);
+          await supabaseAdmin.auth.admin.deleteUser(managerId);
+          return new Response(
+            JSON.stringify({ success: false, error: `Erro ao criar perfil do gerente: ${profErr.message}` }),
+            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // 3. Registrar Identidade no schema private via RPC segura
+        const { data: identityData, error: idErr } = await supabaseAdmin.rpc('admin_register_user_auth_identity', {
+          p_user_id: managerId,
+          p_company_id: newCompany.id,
+          p_login_alias: loginAlias,
+          p_auth_email: authEmail,
+        });
+
+        if (idErr || !identityData?.success) {
+          console.error(`[CID:${correlationId}] [CREATE_MANAGER_IDENTITY_FAILED] Erro na identidade: ${idErr?.message || 'Falha no registro'}`);
+          await supabaseAdmin.from('profiles').delete().eq('id', managerId);
+          await supabaseAdmin.auth.admin.deleteUser(managerId);
+          return new Response(
+            JSON.stringify({ success: false, error: `Erro ao registrar Login YZZY do gerente: ${idErr?.message || 'Falha na identidade'}` }),
+            { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        managerInfo = {
+          loginAlias,
+          tempPassword,
+          fullName: `${managerFirstName} ${managerLastName}`,
+        };
+        console.log(`[CID:${correlationId}] [CREATE_MANAGER_SUCCESS] Gerente provisionado com sucesso: ${managerId} | Alias: ${loginAlias}`);
       }
 
       // Log de Auditoria
@@ -427,14 +454,11 @@ serve(async (req: Request) => {
       let counter = 2;
 
       while (counter < 100) {
-        const { data: exists } = await supabaseAdmin
-          .schema('private')
-          .from('user_auth_identities')
-          .select('id')
-          .eq('login_alias', finalLoginAlias)
-          .maybeSingle();
+        const { data: exists } = await supabaseAdmin.rpc('resolve_login_yzzy_identity', {
+          p_login_alias: finalLoginAlias,
+        });
 
-        if (!exists) break;
+        if (!exists || exists.length === 0) break;
         finalLoginAlias = `${normFirst}.${normLast}${counter}@${comp.slug}.yzzy`;
         counter++;
       }
@@ -481,13 +505,23 @@ serve(async (req: Request) => {
         );
       }
 
-      // Inserir Identidade
-      await supabaseAdmin.schema('private').from('user_auth_identities').insert({
-        user_id: newUserId,
-        company_id: targetCompanyId,
-        login_alias: finalLoginAlias,
-        auth_email: internalAuthEmail,
+      // Inserir Identidade no schema private via RPC segura
+      const { data: identityData, error: idErr } = await supabaseAdmin.rpc('admin_register_user_auth_identity', {
+        p_user_id: newUserId,
+        p_company_id: targetCompanyId,
+        p_login_alias: finalLoginAlias,
+        p_auth_email: internalAuthEmail,
       });
+
+      if (idErr || !identityData?.success) {
+        console.error(`[CID:${correlationId}] [CREATE_EMPLOYEE_IDENTITY_FAILED] Erro na identidade: ${idErr?.message}`);
+        await supabaseAdmin.from('profiles').delete().eq('id', newUserId);
+        await supabaseAdmin.auth.admin.deleteUser(newUserId);
+        return new Response(
+          JSON.stringify({ success: false, error: `Erro ao registrar Login YZZY do funcionário: ${idErr?.message}` }),
+          { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
 
       // Log de Auditoria
       await supabaseAdmin.from('security_audit_logs').insert({
