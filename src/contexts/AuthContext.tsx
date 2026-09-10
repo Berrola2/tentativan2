@@ -158,12 +158,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const changePassword = useCallback(async (newPassword: string): Promise<AuthActionResult> => {
     const res = await changeUserPassword(newPassword);
     if (res.success && session?.user) {
-      setSession((prev) => prev ? {
-        ...prev,
-        user: { ...prev.user, mustChangePassword: false },
-      } : null);
+      const newAuthSession = res.data?.session;
+      if (newAuthSession) {
+        setSession((prev) => prev ? {
+          ...prev,
+          accessToken: newAuthSession.access_token || prev.accessToken,
+          refreshToken: newAuthSession.refresh_token || prev.refreshToken,
+          expiresAt: newAuthSession.expires_at || prev.expiresAt,
+          user: { ...prev.user, mustChangePassword: false },
+        } : null);
+      } else {
+        setSession((prev) => prev ? {
+          ...prev,
+          user: { ...prev.user, mustChangePassword: false },
+        } : null);
+      }
     }
-    return res;
+    return {
+      success: res.success,
+      error: res.error,
+      retryAfterSeconds: res.retryAfterSeconds,
+    };
   }, [session]);
 
   const refreshUser = useCallback(async (): Promise<void> => {

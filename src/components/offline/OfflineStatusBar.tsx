@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { networkState, type NetworkStatus } from '../../services/networkState';
 import { syncEngine, type SyncProgressReport } from '../../services/syncEngine';
+import { useAuth } from '../../contexts/AuthContext';
 import { Cloud, CloudOff, RefreshCw, AlertTriangle, CheckCircle2, HardDrive } from 'lucide-react';
 
 interface OfflineStatusBarProps {
@@ -12,6 +13,7 @@ export const OfflineStatusBar: React.FC<OfflineStatusBarProps> = ({
   onOpenSyncCenter,
   onOpenConflicts
 }) => {
+  const { isSuperAdmin } = useAuth();
   const [netStatus, setNetStatus] = useState<NetworkStatus>(networkState.getStatus());
   const [latency, setLatency] = useState<number>(0);
   const [syncReport, setSyncReport] = useState<SyncProgressReport>({
@@ -45,6 +47,27 @@ export const OfflineStatusBar: React.FC<OfflineStatusBarProps> = ({
       syncEngine.syncPendingOperations();
     }
   };
+
+  // Para papéis não-SuperAdmin (Manager, Inspector, Viewer), renderiza apenas o status limpo sem controles administrativos no DOM
+  if (!isSuperAdmin) {
+    return (
+      <div className="w-full text-xs font-medium py-1.5 px-3 sm:px-4 flex items-center justify-between bg-slate-900 text-slate-200 shadow-sm select-none">
+        <div className="flex items-center space-x-2">
+          {netStatus === 'ONLINE' ? (
+            <>
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span className="text-slate-300">Status: Online</span>
+            </>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span className="text-amber-300 font-semibold">Status: Offline</span>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

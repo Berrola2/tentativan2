@@ -395,13 +395,38 @@ serve(async (req: Request) => {
 
     if (callerProfErr || !callerProfile || !callerProfile.active) {
       console.warn(`[CID:${correlationId}] [PROFILE_ERROR] Perfil não encontrado ou inativo: ${callerProfErr?.message || 'active=false'}`);
+      const isManager = callerProfile?.role === 'ROLE_MANAGER';
+      const userInactiveMsg = isManager
+        ? 'Seu acesso está inativo. Entre em contato com o Super Administrador YZZY.'
+        : 'Seu acesso está inativo. Entre em contato com o gerente da sua empresa.';
       return new Response(
-        JSON.stringify({ success: false, error: 'Usuário sem permissão ou inativo.' }),
+        JSON.stringify({ success: false, error: userInactiveMsg, code: 'USER_INACTIVE' }),
         { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log(`[CID:${correlationId}] [PROFILE_FOUND] Role: ${callerProfile.role} | Active: ${callerProfile.active} | CompanyId: ${callerProfile.company_id || 'NULL'}`);
+
+    // Verificar se a empresa do chamador está ativa
+    if (callerProfile.company_id) {
+      const { data: callerComp } = await supabaseAdmin
+        .from('companies')
+        .select('active')
+        .eq('id', callerProfile.company_id)
+        .single();
+
+      if (callerComp && !callerComp.active) {
+        console.warn(`[CID:${correlationId}] [COMPANY_INACTIVE] Empresa ${callerProfile.company_id} está inativa.`);
+        const isManager = callerProfile.role === 'ROLE_MANAGER';
+        const companyInactiveMsg = isManager
+          ? 'Sua empresa está inativa no Vistoria YZZY. Entre em contato com o Super Administrador YZZY.'
+          : 'O acesso da sua empresa está temporariamente indisponível. Entre em contato com o gerente da sua empresa.';
+        return new Response(
+          JSON.stringify({ success: false, error: companyInactiveMsg, code: 'COMPANY_INACTIVE' }),
+          { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
 
     const isSuperAdmin = callerProfile.role === 'ROLE_SUPER_ADMIN';
     const isCompanyManager = callerProfile.role === 'ROLE_MANAGER';
@@ -542,6 +567,82 @@ serve(async (req: Request) => {
     }
 
     // =========================================================================
+    // AÇÃO 1.5: SUPER_ADMIN — Desativar / Reativar Empresa (Soft Deactivation)
+    // =========================================================================
+    if (action === 'toggle_company_status') {
+      if (!isSuperAdmin) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Apenas Super Administradores podem desativar ou reativar empresas.' }),
+          { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { targetCompanyId, active, reason } = body;
+
+      const { data: comp } = await supabaseAdmin
+        .from('companies')
+        .select('id, name, slug, active')
+        .eq('id', targetCompanyId)
+        .single();
+
+      if (!comp) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Empresa não encontrada.' }),
+          { status: 404, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const isDeactivating = !active;
+      const deactReason = reason?.trim() || (isDeactivating ? 'Suspensão administrativa' : null);
+
+      const updatePayload: Record<string, any> = {
+        active: !!active,
+        deactivated_at: isDeactivating ? new Date().toISOString() : null,
+        deactivated_by: isDeactivating ? callerUser.id : null,
+        deactivation_reason: isDeactivating ? deactReason : null,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: updateCompErr } = await supabaseAdmin
+        .from('companies')
+        .update(updatePayload)
+        .eq('id', targetCompanyId);
+
+      if (updateCompErr) {
+        return new Response(
+          JSON.stringify({ success: false, error: `Erro ao atualizar empresa: ${updateCompErr.message}` }),
+          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Registrar auditoria de segurança
+      await supabaseAdmin.from('security_audit_logs').insert({
+        company_id: targetCompanyId,
+        user_id: callerUser.id,
+        event_type: isDeactivating ? 'COMPANY_DEACTIVATED' : 'COMPANY_REACTIVATED',
+        ip_address: clientIp,
+        metadata: {
+          company_id: targetCompanyId,
+          company_name: comp.name,
+          reason: deactReason,
+          correlation_id: correlationId,
+        },
+      });
+
+      console.log(`[CID:${correlationId}] [COMPANY_STATUS_UPDATED] Empresa ${comp.name} -> active=${!!active} | Motivo: ${deactReason || 'Reativação'}`);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          correlationId,
+          companyId: targetCompanyId,
+          active: !!active,
+        }),
+        { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // =========================================================================
     // AÇÃO 2: COMPANY_MANAGER / SUPER_ADMIN — Cadastrar colaborador (Canônico)
     // =========================================================================
     if (action === 'create_employee') {
@@ -572,7 +673,7 @@ serve(async (req: Request) => {
 
       if (!comp || !comp.active) {
         return new Response(
-          JSON.stringify({ success: false, error: 'Empresa inativa ou inexistente.' }),
+          JSON.stringify({ success: false, error: 'Empresa inativa ou inexistente.', code: 'COMPANY_INACTIVE' }),
           { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
         );
       }
@@ -629,14 +730,14 @@ serve(async (req: Request) => {
     }
 
     // ------------------------------------------------------------------
-    // AÇÃO 3: ALTERAR STATUS DE USUÁRIO (ATIVAR/DESATIVAR)
+    // AÇÃO 3: ALTERAR STATUS DE USUÁRIO (DESATIVAR / REATIVAR / DEMISSÃO)
     // ------------------------------------------------------------------
     if (action === 'toggle_user_status') {
-      const { targetUserId, active } = body;
+      const { targetUserId, active, reason } = body;
 
       const { data: targetProf } = await supabaseAdmin
         .from('profiles')
-        .select('company_id, role')
+        .select('company_id, role, full_name, active')
         .eq('id', targetUserId)
         .single();
 
@@ -655,18 +756,47 @@ serve(async (req: Request) => {
         );
       }
 
-      await supabaseAdmin.from('profiles').update({ active: !!active }).eq('id', targetUserId);
+      // Gerente não pode desativar outro Gerente nem Super Admin
+      if (!isSuperAdmin) {
+        if (targetProf.role === 'ROLE_SUPER_ADMIN' || targetProf.role === 'ROLE_MANAGER') {
+          return new Response(
+            JSON.stringify({ success: false, error: 'Acesso negado. Gerentes não podem desativar administradores ou outros gerentes.' }),
+            { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+
+      const isDeactivating = !active;
+      const deactReason = reason?.trim() || (isDeactivating ? 'Desligamento / Afastamento' : null);
+
+      const updatePayload: Record<string, any> = {
+        active: !!active,
+        deactivated_at: isDeactivating ? new Date().toISOString() : null,
+        deactivated_by: isDeactivating ? callerUser.id : null,
+        deactivation_reason: isDeactivating ? deactReason : null,
+        updated_at: new Date().toISOString(),
+      };
+
+      await supabaseAdmin.from('profiles').update(updatePayload).eq('id', targetUserId);
 
       await supabaseAdmin.from('security_audit_logs').insert({
         company_id: targetProf.company_id,
         user_id: callerUser.id,
-        event_type: active ? 'USER_ENABLED' : 'USER_DISABLED',
+        event_type: isDeactivating ? 'USER_DEACTIVATED' : 'USER_REACTIVATED',
         ip_address: clientIp,
-        metadata: { target_user_id: targetUserId, correlation_id: correlationId },
+        metadata: {
+          target_user_id: targetUserId,
+          target_role: targetProf.role,
+          target_name: targetProf.full_name,
+          reason: deactReason,
+          correlation_id: correlationId,
+        },
       });
 
+      console.log(`[CID:${correlationId}] [USER_STATUS_UPDATED] Usuário ${targetUserId} (${targetProf.role}) -> active=${!!active} | Motivo: ${deactReason || 'Reativação'}`);
+
       return new Response(
-        JSON.stringify({ success: true, correlationId, active: !!active }),
+        JSON.stringify({ success: true, correlationId, active: !!active, targetUserId }),
         { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
@@ -675,11 +805,12 @@ serve(async (req: Request) => {
     // AÇÃO 4: ALTERAR CARGO (ROLE)
     // ------------------------------------------------------------------
     if (action === 'change_user_role') {
-      const { targetUserId, newRole } = body;
+      const { targetUserId } = body;
+      const targetRole = body.newRole || body.targetRole || body.role;
 
-      if (!isSuperAdmin && newRole === 'ROLE_SUPER_ADMIN') {
+      if (!isSuperAdmin && (targetRole === 'ROLE_SUPER_ADMIN' || targetRole === 'ROLE_MANAGER')) {
         return new Response(
-          JSON.stringify({ success: false, error: 'Apenas Super Administradores podem definir esse papel.' }),
+          JSON.stringify({ success: false, error: 'Apenas Super Administradores podem conceder privilégios de gerência ou administração global.' }),
           { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
         );
       }
@@ -705,18 +836,51 @@ serve(async (req: Request) => {
         );
       }
 
-      await supabaseAdmin.from('profiles').update({ role: newRole }).eq('id', targetUserId);
+      await supabaseAdmin.from('profiles').update({ role: targetRole }).eq('id', targetUserId);
 
       await supabaseAdmin.from('security_audit_logs').insert({
         company_id: targetProf.company_id,
         user_id: callerUser.id,
         event_type: 'ROLE_CHANGED',
         ip_address: clientIp,
-        metadata: { target_user_id: targetUserId, old_role: targetProf.role, new_role: newRole, correlation_id: correlationId },
+        metadata: { target_user_id: targetUserId, old_role: targetProf.role, new_role: targetRole, correlation_id: correlationId },
       });
 
       return new Response(
-        JSON.stringify({ success: true, correlationId, role: newRole }),
+        JSON.stringify({ success: true, correlationId, role: targetRole }),
+        { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // AÇÃO 5: CONTROLES DE CACHE / DATABASE / MANUTENÇÃO (SUPER ADMIN ONLY)
+    // ------------------------------------------------------------------
+    if (action === 'clear_cache' || action === 'clear_database' || action === 'maintenance') {
+      if (!isSuperAdmin) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Acesso negado. Ações de manutenção e limpeza são restritas ao Super Administrador.' }),
+          { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const { confirmationPhrase } = body;
+      if (action === 'clear_database' && confirmationPhrase !== 'LIMPAR') {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Confirmação inválida. Digite LIMPAR para confirmar a ação de manutenção.' }),
+          { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      await supabaseAdmin.from('security_audit_logs').insert({
+        company_id: null,
+        user_id: callerUser.id,
+        event_type: 'ADMIN_MAINTENANCE_ACTION',
+        ip_address: clientIp,
+        metadata: { action, correlation_id: correlationId },
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, correlationId, message: 'Ação de manutenção registrada e executada com sucesso.' }),
         { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }

@@ -40,8 +40,8 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
   const [name, setName] = useState(item?.name || '');
   const [status, setStatus] = useState<ConservationStatus>(item?.status || 'Bom');
   const [description, setDescription] = useState(item?.description || '');
-  const [needRepair, setNeedRepair] = useState(item?.needRepair || false);
-  const [repairDetails, setRepairDetails] = useState(item?.repairDetails || '');
+  const [needRepair, setNeedRepair] = useState(Boolean(item?.needRepair || item?.requires_repair));
+  const [repairDetails, setRepairDetails] = useState(item?.repairDetails || item?.repair_notes || '');
   const [repairUrgency, setRepairUrgency] = useState<RepairUrgency>(item?.repairUrgency || 'Média');
   const [photos, setPhotos] = useState<PhotoItem[]>(item?.photos || []);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
@@ -121,9 +121,12 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
       id: item?.id || Math.random().toString(36).substring(2, 9),
       name: name.trim(),
       status,
+      condition_status: status as any,
       description: description.trim(),
       needRepair,
+      requires_repair: needRepair,
       repairDetails: needRepair ? repairDetails.trim() : undefined,
+      repair_notes: needRepair ? repairDetails.trim() : undefined,
       repairUrgency: needRepair ? repairUrgency : undefined,
       photos,
     };
@@ -135,7 +138,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
 
   const statusOptions: { value: ConservationStatus; label: string; desc: string; color: string; border: string }[] = [
     { value: 'Novo', label: 'Novo', desc: 'Sem uso / Impecável', color: 'bg-emerald-50 text-emerald-700', border: 'border-emerald-500' },
-    { value: 'Bom', label: 'Bom', desc: 'Em perfeito estado', color: 'bg-sky-50 text-sky-700', border: 'border-sky-500' },
+    { value: 'Bom', label: 'Bom', desc: 'Em perfeito estado', color: 'bg-primary-50 text-primary-700', border: 'border-primary-500' },
     { value: 'Regular', label: 'Regular', desc: 'Marcas leves de uso', color: 'bg-amber-50 text-amber-700', border: 'border-amber-500' },
     { value: 'Ruim', label: 'Ruim', desc: 'Avariado / Danificado', color: 'bg-rose-50 text-rose-700', border: 'border-rose-500' },
   ];
@@ -148,20 +151,20 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[95vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/60 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-200">
+      <div className="bg-white border border-slate-200 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[95vh] flex flex-col animate-in zoom-in-95 duration-200">
         
         {/* Modal Header */}
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
           <div>
-            <span className="text-[10px] font-bold text-brand-600 uppercase tracking-wider">{roomName}</span>
+            <span className="text-[10px] font-bold text-primary-600 uppercase tracking-wider">{roomName}</span>
             <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
               {item ? 'Editar Item Vistoriado' : 'Novo Item no Ambiente'}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -178,7 +181,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Ex: Paredes e Pintura, Porta Principal, Piso Laminado..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-900 font-medium focus:outline-none focus:border-brand-500 focus:bg-white transition-colors"
+              className="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-slate-900 font-medium focus:outline-none focus:border-primary-500 focus:bg-white transition-colors"
               required
             />
           </div>
@@ -194,15 +197,15 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                     key={opt.value}
                     type="button"
                     onClick={() => setStatus(opt.value)}
-                    className={`p-3 rounded-xl border text-left transition-all duration-150 ${
+                    className={`min-h-[48px] p-3 rounded-2xl border text-left transition-all duration-150 ${
                       isSelected
-                        ? `${opt.color} ${opt.border} ring-2 ring-brand-400/40 shadow-sm font-bold`
+                        ? `${opt.color} ${opt.border} ring-2 ring-primary-400/40 shadow-xs font-bold`
                         : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-xs sm:text-sm">{opt.label}</span>
-                      {isSelected && <CheckCircle2 className="w-4 h-4 text-brand-600" />}
+                      {isSelected && <CheckCircle2 className="w-4 h-4 text-primary-600" />}
                     </div>
                     <span className="block text-[10px] opacity-75 mt-0.5">{opt.desc}</span>
                   </button>
@@ -225,7 +228,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={isProcessingPhoto}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95"
+                  className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95"
                 >
                   <Camera className="w-3.5 h-3.5" />
                   <span>Câmera</span>
@@ -235,7 +238,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                   type="button"
                   onClick={() => galleryInputRef.current?.click()}
                   disabled={isProcessingPhoto}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs transition-colors shadow-sm"
+                  className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs transition-colors shadow-xs"
                 >
                   <Upload className="w-3.5 h-3.5" />
                   <span>Galeria</span>
@@ -268,7 +271,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                 {photos.map((photo, pIdx) => (
                   <div
                     key={photo.id}
-                    className="relative group aspect-square rounded-xl overflow-hidden bg-white border border-slate-200 shadow-sm"
+                    className="relative group aspect-square rounded-xl overflow-hidden bg-white border border-slate-200 shadow-xs"
                   >
                     <img
                       src={photo.dataUrl}
@@ -296,20 +299,22 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                     </button>
 
                     {/* Timestamp */}
-                    <div className="absolute bottom-1 left-1 text-[9px] font-bold bg-black/70 text-white px-1 rounded">
-                      {photo.timestamp}
-                    </div>
+                    {photo.timestamp && (
+                      <div className="absolute bottom-1 left-1 text-[9px] font-bold bg-black/70 text-white px-1 rounded">
+                        {photo.timestamp}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
               <div
                 onClick={() => cameraInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-xl p-5 text-center cursor-pointer transition-colors bg-white text-slate-500 hover:text-brand-600 flex flex-col items-center justify-center gap-1.5"
+                className="border-2 border-dashed border-slate-300 hover:border-primary-500 rounded-2xl p-5 text-center cursor-pointer transition-colors bg-white text-slate-500 hover:text-primary-600 flex flex-col items-center justify-center gap-1.5"
               >
-                <Camera className="w-6 h-6 text-brand-600" />
+                <Camera className="w-6 h-6 text-primary-600" />
                 <span className="font-bold text-xs text-slate-700">Toque aqui para abrir a câmera</span>
-                <span className="text-[11px] text-slate-400">Múltiplas fotos permitidas com data e hora automática</span>
+                <span className="text-[11px] text-slate-400">Múltiplas fotos permitidas com compressão automática</span>
               </div>
             )}
           </div>
@@ -326,7 +331,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="Descreva o estado do material, acabamento, funcionamento, cor e detalhes..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-brand-500 focus:bg-white transition-colors text-xs sm:text-sm resize-y"
+              className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-slate-900 focus:outline-none focus:border-primary-500 focus:bg-white transition-colors text-xs sm:text-sm resize-y"
             />
 
             <SmartSuggestions onSelectSuggestion={handleSelectSuggestion} />
@@ -368,9 +373,9 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                         key={urg.value}
                         type="button"
                         onClick={() => setRepairUrgency(urg.value)}
-                        className={`py-1.5 rounded-xl border text-center text-xs font-bold transition-all ${
+                        className={`min-h-[40px] py-1.5 rounded-xl border text-center text-xs font-bold transition-all ${
                           repairUrgency === urg.value
-                            ? `${urg.color} ring-2 ring-rose-400 font-extrabold shadow-sm`
+                            ? `${urg.color} ring-2 ring-rose-400 font-extrabold shadow-xs`
                             : 'bg-white border-slate-200 text-slate-600'
                         }`}
                       >
@@ -408,17 +413,17 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-200">
+          <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-200">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 font-semibold transition-colors"
+              className="min-h-[48px] px-4 py-2.5 rounded-xl text-slate-600 hover:text-slate-800 hover:bg-slate-100 font-semibold transition-colors flex items-center justify-center"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-bold shadow-md shadow-brand-600/20 transition-all active:scale-95"
+              className="min-h-[48px] flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-bold shadow-md shadow-primary-600/20 transition-all active:scale-95"
             >
               <Save className="w-4 h-4" />
               <span>Salvar Item</span>

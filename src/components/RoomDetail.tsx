@@ -246,7 +246,17 @@ export const RoomDetail: React.FC<RoomDetailProps> = ({
                     : 'bg-slate-50 hover:bg-brand-50 hover:border-brand-300 text-slate-700 hover:text-brand-700 border-slate-200 active:scale-95'
                 }`}
               >
-                {isAlreadyAdded ? `✓ ${item}` : `+ ${item}`}
+                {isAlreadyAdded ? (
+                  <span className="flex items-center gap-1">
+                    <Check className="w-3 h-3 text-slate-400" />
+                    <span>{item}</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <Plus className="w-3 h-3 text-slate-500" />
+                    <span>{item}</span>
+                  </span>
+                )}
               </button>
             );
           })}

@@ -1,16 +1,41 @@
-import React, { useState } from 'react';
-import { Eye, LogOut, FileText, GitCompare } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Eye, FileText, GitCompare, Building } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { InspectionsListView } from '../inspections/InspectionsListView';
 import { InspectionEditorView } from '../inspections/InspectionEditorView';
 import { InspectionComparisonView } from '../comparisons/InspectionComparisonView';
 import { PropertyComparisonsPanel } from '../comparisons/PropertyComparisonsPanel';
+import { PropertiesView } from '../properties/PropertiesView';
+import { Badge } from '../ui/Badge';
 
-export const ViewerDashboard: React.FC = () => {
-  const { user, companyName, companySlug, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'inspections' | 'comparisons'>('inspections');
+export interface ViewerDashboardProps {
+  activeNav?: string;
+  onNavigate?: (id: string) => void;
+}
+
+export const ViewerDashboard: React.FC<ViewerDashboardProps> = ({
+  activeNav,
+  onNavigate,
+}) => {
+  const { companyName } = useAuth();
+  const [internalTab, setInternalTab] = useState<'inspections' | 'comparisons' | 'properties'>('inspections');
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null);
   const [selectedComparisonId, setSelectedComparisonId] = useState<string | null>(null);
+
+  // Sincronizar com navegação externa (Sidebar / BottomNav)
+  useEffect(() => {
+    if (!activeNav) return;
+    if (activeNav === 'inspections' || activeNav === 'dashboard') setInternalTab('inspections');
+    else if (activeNav === 'comparisons') setInternalTab('comparisons');
+    else if (activeNav === 'properties') setInternalTab('properties');
+  }, [activeNav]);
+
+  const handleTabChange = (tab: 'inspections' | 'comparisons' | 'properties') => {
+    setInternalTab(tab);
+    if (onNavigate) {
+      onNavigate(tab);
+    }
+  };
 
   if (selectedComparisonId) {
     return (
@@ -31,102 +56,98 @@ export const ViewerDashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
+    <div className="w-full space-y-6 animate-fadeIn font-sans text-yzzy-text-primary p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
       
-      {/* Header Visualizador */}
-      <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-white font-bold shadow-md">
-              <Eye className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base font-black tracking-tight text-slate-900">
-                Painel de Consulta
-              </h1>
-              <p className="text-xs text-slate-500">
-                {companyName || 'Vistoria YZZY'} • <span className="font-mono">@{companySlug}.yzzy</span>
-              </p>
-            </div>
+      {/* Hero Header */}
+      <div className="bg-white rounded-card p-6 sm:p-8 border border-yzzy-border shadow-card flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold border border-slate-200">
+            <Eye className="w-3.5 h-3.5 text-slate-500" />
+            <span>Perfil de Consulta • Leitura & Auditoria</span>
           </div>
-
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-bold text-slate-800">{user?.displayName || user?.fullName}</p>
-              <span className="text-[10px] font-bold text-slate-500">Visualizador (Somente Leitura)</span>
-            </div>
-            <button
-              onClick={() => logout()}
-              className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition-colors"
-              title="Sair"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-yzzy-text-primary tracking-tight font-display">
+            Painel de Consulta
+          </h1>
+          <p className="text-sm text-yzzy-text-secondary">
+            Acesso protegido a laudos, vistorias e relatórios comparativos da <strong className="text-yzzy-text-primary">{companyName || 'empresa'}</strong>.
+          </p>
         </div>
 
-        {/* Tabs */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-2 border-t border-slate-100 pt-1 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('inspections')}
-            className={`py-2 px-4 text-xs font-bold flex items-center gap-1.5 border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'inspections'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Vistorias Concluídas</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('comparisons')}
-            className={`py-2 px-4 text-xs font-bold flex items-center gap-1.5 border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'comparisons'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <GitCompare className="w-3.5 h-3.5" />
-            <span>Laudos Comparativos</span>
-          </button>
+        <div className="flex items-center gap-2">
+          <Badge variant="neutral" size="md">
+            Somente Leitura
+          </Badge>
         </div>
-      </header>
+      </div>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
-        
-        {activeTab === 'inspections' && (
-          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-            <div>
-              <h2 className="text-base font-black text-slate-900">Vistorias Concluídas e Liberadas</h2>
-              <p className="text-xs text-slate-500">Acesso protegido e restrito à leitura de laudos finalizados da empresa</p>
-            </div>
+      {/* Navegação entre Visualizações */}
+      <div className="flex items-center gap-2 border-b border-yzzy-border pb-3 overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => handleTabChange('inspections')}
+          className={`px-4 py-2 rounded-btn text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap ${
+            internalTab === 'inspections'
+              ? 'bg-primary-50 text-primary-700 border border-primary-100'
+              : 'text-yzzy-text-secondary hover:text-yzzy-text-primary hover:bg-surface-secondary'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Vistorias da Empresa</span>
+        </button>
 
-            <InspectionsListView
-              onOpenInspection={(id) => setSelectedInspectionId(id)}
-              onNewInspectionClick={() => {}}
-              canCreateInspection={false}
-            />
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => handleTabChange('comparisons')}
+          className={`px-4 py-2 rounded-btn text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap ${
+            internalTab === 'comparisons'
+              ? 'bg-primary-50 text-primary-700 border border-primary-100'
+              : 'text-yzzy-text-secondary hover:text-yzzy-text-primary hover:bg-surface-secondary'
+          }`}
+        >
+          <GitCompare className="w-4 h-4" />
+          <span>Laudos Comparativos</span>
+        </button>
 
-        {activeTab === 'comparisons' && (
-          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-            <div>
-              <h2 className="text-base font-black text-slate-900">Laudos Comparativos Finalizados</h2>
-              <p className="text-xs text-slate-500">Consulta de comparações periciais homologadas entre Entrada e Saída</p>
-            </div>
+        <button
+          type="button"
+          onClick={() => handleTabChange('properties')}
+          className={`px-4 py-2 rounded-btn text-xs font-bold transition-colors flex items-center gap-2 whitespace-nowrap ${
+            internalTab === 'properties'
+              ? 'bg-primary-50 text-primary-700 border border-primary-100'
+              : 'text-yzzy-text-secondary hover:text-yzzy-text-primary hover:bg-surface-secondary'
+          }`}
+        >
+          <Building className="w-4 h-4" />
+          <span>Imóveis Cadastrados</span>
+        </button>
+      </div>
 
-            <PropertyComparisonsPanel
-              onOpenComparison={(id) => setSelectedComparisonId(id)}
-              canCreateComparison={false}
-            />
-          </div>
-        )}
+      {/* Conteúdo Dinâmico */}
+      {internalTab === 'inspections' && (
+        <div className="space-y-4">
+          <InspectionsListView
+            onOpenInspection={(id) => setSelectedInspectionId(id)}
+            onNewInspectionClick={() => {}}
+            canCreateInspection={false}
+          />
+        </div>
+      )}
 
-      </main>
+      {internalTab === 'comparisons' && (
+        <div className="space-y-4">
+          <PropertyComparisonsPanel
+            onOpenComparison={(id) => setSelectedComparisonId(id)}
+            canCreateComparison={false}
+          />
+        </div>
+      )}
+
+      {internalTab === 'properties' && (
+        <div className="space-y-4">
+          <PropertiesView />
+        </div>
+      )}
+
     </div>
   );
 };
-

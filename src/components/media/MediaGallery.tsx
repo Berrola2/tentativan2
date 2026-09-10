@@ -35,7 +35,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
     return (
       <div className="py-6 px-4 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
         <ImageIcon className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-        <p className="text-xs font-medium text-slate-500">Nenhuma foto adicionada ainda.</p>
+        <p className="text-xs font-semibold text-slate-600">Nenhuma foto adicionada ainda.</p>
         <p className="text-[11px] text-slate-400 mt-0.5">Tire uma foto ou selecione da galeria acima.</p>
       </div>
     );
@@ -68,8 +68,8 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
 
   const handleDelete = async (mediaId: string) => {
     if (readOnly || !onDeleteMedia) return;
-    const confirm = window.confirm('Deseja realmente excluir esta foto? Esta ação não pode ser desfeita.');
-    if (!confirm) return;
+    const confirmDelete = window.confirm('Deseja realmente excluir esta foto? Esta ação não pode ser desfeita.');
+    if (!confirmDelete) return;
 
     try {
       await onDeleteMedia(mediaId);
@@ -84,12 +84,12 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
 
   return (
     <div className="w-full space-y-3">
-      {/* Grid de Fotos */}
+      {/* Grid de Fotos: 2 cols on mobile, 3 on sm, 4 on md */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {mediaList.map((media, index) => (
           <div
             key={media.id}
-            className="group relative bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col hover:border-blue-400 transition-all"
+            className="group relative bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col hover:border-primary-400 transition-all"
           >
             {/* Imagem Thumbnail */}
             <div
@@ -104,21 +104,21 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
               />
 
               {/* Tag de Numeração: Foto 1, Foto 2 */}
-              <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-md text-[11px] font-semibold text-white tracking-wide">
+              <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/60 backdrop-blur-md rounded-md text-[10px] font-bold text-white tracking-wide">
                 Foto {index + 1}
               </div>
 
-              {/* Hover Overlay */}
+              {/* Hover/Tap Overlay */}
               <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <span className="p-2 rounded-full bg-white/80 text-slate-800 shadow-sm">
-                  <Eye className="w-4 h-4" />
+                <span className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-white/90 text-slate-800 shadow-md">
+                  <Eye className="w-5 h-5" />
                 </span>
               </div>
             </div>
 
             {/* Legenda e Ações Rápidas */}
-            <div className="p-2 flex flex-col justify-between flex-1 bg-white border-t border-slate-100">
-              <div className="mb-1.5">
+            <div className="p-2.5 flex flex-col justify-between flex-1 bg-white border-t border-slate-100">
+              <div className="mb-2">
                 {media.caption ? (
                   <p className="text-[11px] text-slate-700 font-medium line-clamp-2 leading-tight">
                     {media.caption}
@@ -130,10 +130,10 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
                 )}
               </div>
 
-              {/* Controles de Reordenação e Exclusão */}
+              {/* Controles de Reordenação e Exclusão com Touch Targets >= 44px */}
               {!readOnly && (
                 <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                  <div className="flex items-center gap-0.5">
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
                       disabled={index === 0 || isReordering}
@@ -142,9 +142,9 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
                         handleMove(index, 'left');
                       }}
                       title="Mover para esquerda"
-                      className="p-1 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-30 transition-colors"
+                      className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 disabled:opacity-30 transition-colors"
                     >
-                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <ChevronLeft className="w-4 h-4" />
                     </button>
                     <button
                       type="button"
@@ -154,9 +154,9 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
                         handleMove(index, 'right');
                       }}
                       title="Mover para direita"
-                      className="p-1 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-30 transition-colors"
+                      className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 disabled:opacity-30 transition-colors"
                     >
-                      <ChevronRight className="w-3.5 h-3.5" />
+                      <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
 
@@ -167,9 +167,9 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
                       handleDelete(media.id);
                     }}
                     title="Excluir foto"
-                    className="p-1 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               )}

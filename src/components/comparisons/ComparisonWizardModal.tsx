@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   GitCompare, 
-  XCircle, 
   Building, 
   ArrowRight, 
-  AlertCircle, 
-  Loader2, 
+  ArrowLeft,
   Calendar, 
   Sparkles,
-  Info
+  X,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { fetchProperties } from '../../services/properties';
 import { fetchInspections } from '../../services/inspections';
 import { createAndProcessComparison } from '../../services/comparisons';
 import type { Property, Inspection } from '../../types/inspection';
+import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
+import { Alert } from '../ui/Alert';
+import { Skeleton } from '../ui/Skeleton';
 
 interface ComparisonWizardModalProps {
   onClose: () => void;
@@ -52,8 +56,8 @@ export const ComparisonWizardModal: React.FC<ComparisonWizardModalProps> = ({
             setSelectedProperty(found);
           }
         }
-      } catch (err: unknown) {
-        setErrorMessage('Erro ao carregar lista de imóveis.');
+      } catch {
+        setErrorMessage('Não foi possível carregar a lista de imóveis.');
       } finally {
         setIsLoading(false);
       }
@@ -70,8 +74,8 @@ export const ComparisonWizardModal: React.FC<ComparisonWizardModalProps> = ({
       // Apenas vistorias COMPLETED
       const completed = data.filter(i => i.status === 'COMPLETED');
       setInspections(completed);
-    } catch (err: unknown) {
-      setErrorMessage('Erro ao carregar vistorias do imóvel selecionado.');
+    } catch {
+      setErrorMessage('Não foi possível carregar as vistorias do imóvel selecionado.');
     } finally {
       setIsLoading(false);
     }
@@ -115,363 +119,360 @@ export const ComparisonWizardModal: React.FC<ComparisonWizardModalProps> = ({
 
     try {
       setProcessingStage('Normalizando nomes de ambientes e cômodos...');
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 500));
 
       setProcessingStage('Comparando estados de conservação e itens...');
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 500));
 
-      setProcessingStage('Sintetizando histórico descritivo...');
+      setProcessingStage('Sintetizando histórico descritivo pericial...');
       
       const res = await createAndProcessComparison(selectedCheckIn.id, selectedCheckOut.id);
       
       if (!res.success || !res.comparisonId) {
-        setErrorMessage(res.error || 'Falha ao processar comparação automática.');
+        setErrorMessage(res.error || 'Não foi possível concluir a comparação automática.');
         setIsProcessing(false);
         return;
       }
 
-      setProcessingStage('Comparação concluída com sucesso!');
+      setProcessingStage('Confronto pericial concluído com sucesso!');
       await new Promise(r => setTimeout(r, 400));
       onComparisonCreated(res.comparisonId);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro no processamento.';
+      const msg = err instanceof Error ? err.message : 'Falha no processamento do confronto.';
       setErrorMessage(msg);
       setIsProcessing(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto font-sans">
-      <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6 animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
+      <div className="bg-white rounded-modal max-w-2xl w-full p-5 sm:p-7 shadow-floating border border-yzzy-border space-y-5 animate-scaleIn max-h-[92vh] flex flex-col my-auto">
         
-        {/* Modal Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <GitCompare className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-base font-black text-slate-900">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-3 border-b border-yzzy-border/60 shrink-0">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-btn bg-primary-50 text-primary-700 flex items-center justify-center font-bold">
+                <GitCompare className="w-4 h-4 text-primary-600" />
+              </div>
+              <h2 className="text-base sm:text-lg font-bold text-yzzy-text-primary">
                 Nova Comparação Entrada × Saída
-              </h3>
-              <p className="text-xs text-slate-500">
-                Identificação automática e assistiva de alterações no imóvel
-              </p>
+              </h2>
             </div>
+            <p className="text-xs text-yzzy-text-secondary pl-10">
+              Confronto assistivo e identificação de divergências no imóvel
+            </p>
           </div>
-          
+
           {!isProcessing && (
             <button 
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className="p-1.5 rounded-btn text-yzzy-text-muted hover:text-yzzy-text-primary hover:bg-surface-secondary transition-colors"
             >
-              <XCircle className="w-5 h-5" />
+              <X className="w-5 h-5" />
             </button>
           )}
         </div>
 
-        {/* Steps Progress Indicator */}
+        {/* Stepper Progress */}
         {!isProcessing && (
-          <div className="grid grid-cols-4 gap-2 text-center text-[11px] font-bold">
-            <div className={`p-2 rounded-xl border ${step === 1 ? 'bg-blue-50 border-blue-200 text-blue-700' : selectedProperty ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+          <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold shrink-0">
+            <div className={`p-2 rounded-btn border transition-all ${
+              step === 1 ? 'bg-primary-50 border-primary-200 text-primary-700 font-bold' : selectedProperty ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-surface-secondary border-yzzy-border text-yzzy-text-muted'
+            }`}>
               1. Imóvel
             </div>
-            <div className={`p-2 rounded-xl border ${step === 2 ? 'bg-blue-50 border-blue-200 text-blue-700' : selectedCheckIn ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <div className={`p-2 rounded-btn border transition-all ${
+              step === 2 ? 'bg-primary-50 border-primary-200 text-primary-700 font-bold' : selectedCheckIn ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-surface-secondary border-yzzy-border text-yzzy-text-muted'
+            }`}>
               2. Entrada
             </div>
-            <div className={`p-2 rounded-xl border ${step === 3 ? 'bg-blue-50 border-blue-200 text-blue-700' : selectedCheckOut ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <div className={`p-2 rounded-btn border transition-all ${
+              step === 3 ? 'bg-primary-50 border-primary-200 text-primary-700 font-bold' : selectedCheckOut ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-surface-secondary border-yzzy-border text-yzzy-text-muted'
+            }`}>
               3. Saída
             </div>
-            <div className={`p-2 rounded-xl border ${step === 4 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-400'}`}>
+            <div className={`p-2 rounded-btn border transition-all ${
+              step === 4 ? 'bg-primary-50 border-primary-200 text-primary-700 font-bold' : 'bg-surface-secondary border-yzzy-border text-yzzy-text-muted'
+            }`}>
               4. Confirmar
             </div>
           </div>
         )}
 
-        {/* Error Notification */}
+        {/* Error Alert */}
         {errorMessage && (
-          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
+          <Alert type="error">
             <span>{errorMessage}</span>
-          </div>
+          </Alert>
         )}
 
-        {/* Processing State with Animated Feedback */}
-        {isProcessing ? (
-          <div className="py-12 px-4 text-center space-y-4">
-            <div className="relative w-16 h-16 mx-auto">
-              <Loader2 className="w-16 h-16 animate-spin text-blue-600" />
-              <Sparkles className="w-6 h-6 text-amber-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
-            </div>
-            <div>
-              <h4 className="text-base font-black text-slate-900">Processando Comparação</h4>
-              <p className="text-xs text-blue-600 font-medium mt-1 animate-pulse">{processingStage}</p>
-            </div>
-            <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
-              Realizando match de ambientes, mapeando conservação de itens e preparando painel de revisão pericial.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* STEP 1: Selecionar Imóvel */}
-            {step === 1 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    Selecione o Imóvel
-                  </h4>
-                  <span className="text-[11px] text-slate-400">
-                    {properties.length} imóvel(is) disponível(is)
-                  </span>
-                </div>
-
-                {isLoading ? (
-                  <div className="py-8 text-center text-slate-400 flex flex-col items-center gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                    <span className="text-xs">Carregando imóveis...</span>
-                  </div>
-                ) : properties.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400 border border-dashed border-slate-200 rounded-2xl">
-                    Nenhum imóvel ativo cadastrado.
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                    {properties.map((prop) => (
-                      <div
-                        key={prop.id}
-                        onClick={() => handleSelectProperty(prop)}
-                        className="p-3.5 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-all flex items-center justify-between group"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                            <Building className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-900">
-                              {prop.street}{prop.number ? `, ${prop.number}` : ''}
-                            </p>
-                            <p className="text-[11px] text-slate-500">
-                              {prop.neighborhood ? `${prop.neighborhood}, ` : ''}{prop.city} - {prop.state}
-                            </p>
-                          </div>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-blue-600 transition-colors" />
-                      </div>
-                    ))}
-                  </div>
-                )}
+        {/* Content Body */}
+        <div className="flex-1 overflow-y-auto pr-1">
+          
+          {/* State: Processing Animation */}
+          {isProcessing ? (
+            <div className="py-12 px-4 text-center space-y-4">
+              <div className="relative w-16 h-16 mx-auto">
+                <div className="w-16 h-16 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin" />
+                <Sparkles className="w-6 h-6 text-amber-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
               </div>
-            )}
-
-            {/* STEP 2: Selecionar Vistoria de Entrada */}
-            {step === 2 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                      Vistoria de Entrada (Check-In)
+              <div className="space-y-1">
+                <h4 className="text-base font-bold text-yzzy-text-primary">Processando Confronto Pericial</h4>
+                <p className="text-xs text-primary-600 font-semibold animate-pulse">{processingStage}</p>
+              </div>
+              <p className="text-[11px] text-yzzy-text-muted max-w-sm mx-auto">
+                Mapeando ambientes, avaliando variações de conservação dos itens e preparando painel de laudo comparativo.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* STEP 1: Selecionar Imóvel */}
+              {step === 1 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-yzzy-text-secondary">
+                      Selecione o Imóvel
                     </h4>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {selectedProperty?.street}, {selectedProperty?.number}
-                    </p>
+                    <span className="text-[11px] text-yzzy-text-muted font-semibold">
+                      {properties.length} imóvel(is) ativo(s)
+                    </span>
                   </div>
-                  {!initialPropertyId && (
-                    <button
-                      onClick={() => setStep(1)}
-                      className="text-xs text-blue-600 hover:underline font-bold"
-                    >
-                      Trocar Imóvel
-                    </button>
+
+                  {isLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-14 w-full rounded-card" />
+                      <Skeleton className="h-14 w-full rounded-card" />
+                    </div>
+                  ) : properties.length === 0 ? (
+                    <div className="p-8 text-center text-yzzy-text-muted border border-dashed border-yzzy-border rounded-card">
+                      Nenhum imóvel ativo cadastrado.
+                    </div>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {properties.map((prop) => (
+                        <div
+                          key={prop.id}
+                          onClick={() => handleSelectProperty(prop)}
+                          className="p-3.5 rounded-card border border-yzzy-border hover:border-primary-300 hover:bg-primary-50/30 cursor-pointer transition-all flex items-center justify-between group"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-btn bg-surface-secondary flex items-center justify-center text-yzzy-text-secondary group-hover:bg-primary-600 group-hover:text-white transition-colors shrink-0">
+                              <Building className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-yzzy-text-primary truncate">
+                                {prop.street}{prop.number ? `, ${prop.number}` : ''}
+                              </p>
+                              <p className="text-[11px] text-yzzy-text-muted truncate">
+                                {prop.neighborhood ? `${prop.neighborhood}, ` : ''}{prop.city} - {prop.state}
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowRight className="w-4 h-4 text-yzzy-text-muted group-hover:text-primary-600 transition-colors shrink-0" />
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
+              )}
 
-                {isLoading ? (
-                  <div className="py-8 text-center text-slate-400 flex flex-col items-center gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                    <span className="text-xs">Buscando vistorias de entrada...</span>
-                  </div>
-                ) : checkInInspections.length === 0 ? (
-                  <div className="p-6 text-center text-slate-500 border border-dashed border-slate-200 rounded-2xl space-y-2">
-                    <AlertCircle className="w-8 h-8 mx-auto text-amber-500" />
-                    <p className="text-xs font-bold text-slate-800">
-                      Nenhuma Vistoria de Entrada concluída encontrada.
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      É necessário que a vistoria de entrada esteja com status CONCLUÍDA (COMPLETED) para permitir a comparação.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                    {checkInInspections.map((insp) => (
-                      <div
-                        key={insp.id}
-                        onClick={() => handleSelectCheckIn(insp)}
-                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
-                          selectedCheckIn?.id === insp.id
-                            ? 'border-blue-600 bg-blue-50/70'
-                            : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'
-                        }`}
+              {/* STEP 2: Selecionar Vistoria de Entrada */}
+              {step === 2 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-yzzy-text-secondary">
+                        Vistoria de Entrada (Check-In)
+                      </h4>
+                      <p className="text-[11px] text-yzzy-text-muted mt-0.5 font-semibold">
+                        {selectedProperty?.street}, {selectedProperty?.number}
+                      </p>
+                    </div>
+                    {!initialPropertyId && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setStep(1)}
+                        className="text-xs font-bold"
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-black text-xs">
-                            IN
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-900">{insp.title}</p>
-                            <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              <span>{new Date(insp.inspection_date).toLocaleDateString('pt-BR')}</span>
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
-                                CONCLUÍDA
-                              </span>
-                            </p>
-                          </div>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-slate-400" />
-                      </div>
-                    ))}
+                        Trocar Imóvel
+                      </Button>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
 
-            {/* STEP 3: Selecionar Vistoria de Saída */}
-            {step === 3 && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                      Vistoria de Saída (Check-Out)
+                  {isLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-14 w-full rounded-card" />
+                    </div>
+                  ) : checkInInspections.length === 0 ? (
+                    <div className="p-6 text-center text-yzzy-text-muted border border-dashed border-amber-200 bg-amber-50/40 rounded-card space-y-2">
+                      <AlertCircle className="w-8 h-8 mx-auto text-amber-500" />
+                      <p className="text-xs font-bold text-slate-800">
+                        Nenhuma Vistoria de Entrada concluída encontrada.
+                      </p>
+                      <p className="text-[11px] text-slate-600 max-w-sm mx-auto">
+                        Para realizar a comparação pericial, o imóvel precisa de uma Vistoria de Entrada homologada (Concluída).
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {checkInInspections.map((insp) => (
+                        <div
+                          key={insp.id}
+                          onClick={() => handleSelectCheckIn(insp)}
+                          className={`p-3.5 rounded-card border cursor-pointer transition-all flex items-center justify-between ${
+                            selectedCheckIn?.id === insp.id
+                              ? 'border-primary-600 bg-primary-50/60 shadow-xs'
+                              : 'border-yzzy-border hover:border-primary-300 hover:bg-surface-secondary/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Badge variant="primary" size="sm">ENTRADA</Badge>
+                            <div>
+                              <p className="text-xs font-bold text-yzzy-text-primary">{insp.title}</p>
+                              <p className="text-[11px] text-yzzy-text-muted flex items-center gap-1.5 mt-0.5">
+                                <Calendar className="w-3 h-3" />
+                                <span>{insp.inspection_date ? new Date(insp.inspection_date).toLocaleDateString('pt-BR') : new Date(insp.created_at).toLocaleDateString('pt-BR')}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowRight className="w-4 h-4 text-yzzy-text-muted" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* STEP 3: Selecionar Vistoria de Saída */}
+              {step === 3 && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-yzzy-text-secondary">
+                        Vistoria de Saída (Check-Out)
+                      </h4>
+                      <p className="text-[11px] text-primary-700 mt-0.5 font-semibold">
+                        Entrada vinculada: {selectedCheckIn?.title}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setStep(2)}
+                      className="text-xs font-bold"
+                    >
+                      Trocar Entrada
+                    </Button>
+                  </div>
+
+                  {isLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-14 w-full rounded-card" />
+                    </div>
+                  ) : checkOutInspections.length === 0 ? (
+                    <div className="p-6 text-center text-yzzy-text-muted border border-dashed border-amber-200 bg-amber-50/40 rounded-card space-y-2">
+                      <AlertCircle className="w-8 h-8 mx-auto text-amber-500" />
+                      <p className="text-xs font-bold text-slate-800">
+                        Nenhuma Vistoria de Saída concluída encontrada.
+                      </p>
+                      <p className="text-[11px] text-slate-600 max-w-sm mx-auto">
+                        Finalize a Vistoria de Saída deste imóvel antes de iniciar o confronto pericial.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {checkOutInspections.map((insp) => (
+                        <div
+                          key={insp.id}
+                          onClick={() => handleSelectCheckOut(insp)}
+                          className={`p-3.5 rounded-card border cursor-pointer transition-all flex items-center justify-between ${
+                            selectedCheckOut?.id === insp.id
+                              ? 'border-amber-600 bg-amber-50/60 shadow-xs'
+                              : 'border-yzzy-border hover:border-amber-300 hover:bg-surface-secondary/60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Badge variant="warning" size="sm">SAÍDA</Badge>
+                            <div>
+                              <p className="text-xs font-bold text-yzzy-text-primary">{insp.title}</p>
+                              <p className="text-[11px] text-yzzy-text-muted flex items-center gap-1.5 mt-0.5">
+                                <Calendar className="w-3 h-3" />
+                                <span>{insp.inspection_date ? new Date(insp.inspection_date).toLocaleDateString('pt-BR') : new Date(insp.created_at).toLocaleDateString('pt-BR')}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowRight className="w-4 h-4 text-yzzy-text-muted" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* STEP 4: Confirmação e Início */}
+              {step === 4 && selectedCheckIn && selectedCheckOut && (
+                <div className="space-y-4 py-1">
+                  <div className="p-4 bg-surface-secondary border border-yzzy-border rounded-card space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-yzzy-text-secondary">
+                      Resumo do Confronto Pericial
                     </h4>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Entrada selecionada: {selectedCheckIn?.title}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setStep(2)}
-                    className="text-xs text-blue-600 hover:underline font-bold"
-                  >
-                    Voltar
-                  </button>
-                </div>
 
-                {isLoading ? (
-                  <div className="py-8 text-center text-slate-400 flex flex-col items-center gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                    <span className="text-xs">Buscando vistorias de saída...</span>
-                  </div>
-                ) : checkOutInspections.length === 0 ? (
-                  <div className="p-6 text-center text-slate-500 border border-dashed border-slate-200 rounded-2xl space-y-2">
-                    <AlertCircle className="w-8 h-8 mx-auto text-amber-500" />
-                    <p className="text-xs font-bold text-slate-800">
-                      Nenhuma Vistoria de Saída concluída encontrada.
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      Para realizar o comparativo, é obrigatório haver uma Vistoria de Saída concluída no mesmo imóvel.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                    {checkOutInspections.map((insp) => (
-                      <div
-                        key={insp.id}
-                        onClick={() => handleSelectCheckOut(insp)}
-                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
-                          selectedCheckOut?.id === insp.id
-                            ? 'border-indigo-600 bg-indigo-50/70'
-                            : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-xs">
-                            OUT
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-900">{insp.title}</p>
-                            <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              <span>{new Date(insp.inspection_date).toLocaleDateString('pt-BR')}</span>
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
-                                CONCLUÍDA
-                              </span>
-                            </p>
-                          </div>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-slate-400" />
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between p-2.5 rounded-btn bg-white border border-yzzy-border">
+                        <span className="font-semibold text-yzzy-text-secondary">Imóvel</span>
+                        <span className="font-bold text-yzzy-text-primary">{selectedProperty?.street}, {selectedProperty?.number}</span>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
-            {/* STEP 4: Confirmação e Disparo */}
-            {step === 4 && selectedCheckIn && selectedCheckOut && (
-              <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Resumo da Comparação
-                </h4>
+                      <div className="flex items-center justify-between p-2.5 rounded-btn bg-primary-50/50 border border-primary-100">
+                        <span className="font-semibold text-primary-800">1. Vistoria de Entrada</span>
+                        <span className="font-bold text-primary-900">{selectedCheckIn.title}</span>
+                      </div>
 
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                  <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-200">
-                    <span className="font-bold text-slate-500">Imóvel:</span>
-                    <span className="font-bold text-slate-900">
-                      {selectedProperty?.street}, {selectedProperty?.number}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="p-3 bg-white rounded-xl border border-blue-200">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block">
-                        Vistoria de Entrada
-                      </span>
-                      <p className="text-xs font-bold text-slate-900 mt-0.5">{selectedCheckIn.title}</p>
-                      <p className="text-[10px] text-slate-400">
-                        {new Date(selectedCheckIn.inspection_date).toLocaleDateString('pt-BR')}
-                      </p>
-                    </div>
-
-                    <div className="p-3 bg-white rounded-xl border border-indigo-200">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 block">
-                        Vistoria de Saída
-                      </span>
-                      <p className="text-xs font-bold text-slate-900 mt-0.5">{selectedCheckOut.title}</p>
-                      <p className="text-[10px] text-slate-400">
-                        {new Date(selectedCheckOut.inspection_date).toLocaleDateString('pt-BR')}
-                      </p>
+                      <div className="flex items-center justify-between p-2.5 rounded-btn bg-amber-50/50 border border-amber-100">
+                        <span className="font-semibold text-amber-800">2. Vistoria de Saída</span>
+                        <span className="font-bold text-amber-900">{selectedCheckOut.title}</span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100 flex items-start gap-2 text-[11px] text-blue-900">
-                    <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                    <span>
-                      A comparação é <strong>estritamente assistiva</strong> e factual. O sistema não atribui culpa ou responsabilidade jurídica causal. A conclusão pericial final é exclusiva do vistoriador ou gerente.
-                    </span>
+                  <p className="text-[11px] text-yzzy-text-muted leading-relaxed">
+                    Ao confirmar, o sistema comparará todos os ambientes e itens de forma determinística, mapeando estados de conservação, novas avarias e alterações descritivas para revisão pericial.
+                  </p>
+
+                  <div className="pt-3 flex gap-3">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="md"
+                      onClick={() => setStep(3)}
+                      leftIcon={<ArrowLeft className="w-3.5 h-3.5" />}
+                      className="w-1/3 text-xs font-bold"
+                    >
+                      Voltar
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="md"
+                      onClick={handleStartComparison}
+                      leftIcon={<CheckCircle2 className="w-4 h-4" />}
+                      className="w-2/3 text-xs font-bold shadow-xs hover:shadow-subtle-blue"
+                    >
+                      Iniciar Comparação
+                    </Button>
                   </div>
                 </div>
+              )}
+            </>
+          )}
 
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setStep(3)}
-                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 transition-colors"
-                  >
-                    Voltar
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleStartComparison}
-                    className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all active:scale-95"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Iniciar Comparação Automática</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
+        </div>
 
       </div>
     </div>

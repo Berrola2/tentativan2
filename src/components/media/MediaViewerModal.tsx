@@ -130,9 +130,9 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between select-none animate-in fade-in duration-200">
       {/* Barra de Topo */}
-      <div className="flex items-center justify-between p-4 text-white z-10">
+      <div className="flex items-center justify-between p-3 sm:p-4 text-white z-10">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tracking-wide bg-white/10 px-3 py-1 rounded-full border border-white/10">
+          <span className="text-xs sm:text-sm font-semibold tracking-wide bg-white/10 px-3 py-1.5 rounded-full border border-white/10">
             Foto {currentIndex + 1} de {mediaList.length}
           </span>
           {currentMedia.width && currentMedia.height && (
@@ -143,11 +143,11 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Zoom Buttons */}
+          {/* Zoom Buttons com Touch Target >= 44px */}
           <button
             type="button"
             onClick={() => setZoomLevel((z) => Math.min(z + 0.5, 3))}
-            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
             title="Aumentar Zoom"
           >
             <ZoomIn className="w-5 h-5" />
@@ -155,7 +155,7 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
           <button
             type="button"
             onClick={() => setZoomLevel((z) => Math.max(z - 0.5, 1))}
-            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
             title="Diminuir Zoom"
           >
             <ZoomOut className="w-5 h-5" />
@@ -164,7 +164,7 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
             <button
               type="button"
               onClick={() => setZoomLevel(1)}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
               title="Resetar Zoom"
             >
               <Maximize2 className="w-5 h-5" />
@@ -175,7 +175,7 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
             <button
               type="button"
               onClick={() => onDelete(currentMedia.id)}
-              className="p-2 rounded-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 transition-colors ml-2"
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 transition-colors ml-1"
               title="Excluir Foto"
             >
               <Trash2 className="w-5 h-5" />
@@ -185,10 +185,10 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors ml-2"
+            className="min-w-[48px] min-h-[48px] flex items-center justify-center rounded-full bg-white/15 hover:bg-white/25 text-white transition-colors ml-2"
             title="Fechar (Esc)"
           >
-            <X className="w-5 h-5" />
+            <X className="w-6 h-6" />
           </button>
         </div>
       </div>
@@ -204,7 +204,8 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
           <button
             type="button"
             onClick={handlePrev}
-            className="absolute left-4 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/10 z-20 backdrop-blur-sm transition-all active:scale-95"
+            className="absolute left-3 sm:left-6 min-w-[48px] min-h-[48px] flex items-center justify-center rounded-full bg-black/60 hover:bg-black/90 text-white border border-white/20 z-20 backdrop-blur-md transition-all active:scale-95 shadow-xl"
+            title="Foto Anterior"
           >
             <ChevronLeft className="w-6 h-6" />
           </button>
@@ -218,7 +219,7 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
           <img
             src={currentMedia.signed_url || currentMedia.thumbnail_url || ''}
             alt={currentMedia.caption || `Foto ${currentIndex + 1}`}
-            className="max-h-[72vh] max-w-full object-contain rounded-lg shadow-2xl"
+            className="max-h-[72vh] max-w-full object-contain rounded-xl shadow-2xl"
           />
         </div>
 
@@ -227,7 +228,8 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
           <button
             type="button"
             onClick={handleNext}
-            className="absolute right-4 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/10 z-20 backdrop-blur-sm transition-all active:scale-95"
+            className="absolute right-3 sm:right-6 min-w-[48px] min-h-[48px] flex items-center justify-center rounded-full bg-black/60 hover:bg-black/90 text-white border border-white/20 z-20 backdrop-blur-md transition-all active:scale-95 shadow-xl"
+            title="Próxima Foto"
           >
             <ChevronRight className="w-6 h-6" />
           </button>
@@ -235,20 +237,20 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
       </div>
 
       {/* Barra Inferior: Edição de Legenda com Autosave */}
-      <div className="p-4 bg-black/60 backdrop-blur-md border-t border-white/10 z-10">
+      <div className="p-4 bg-black/70 backdrop-blur-md border-t border-white/10 z-10">
         <div className="max-w-2xl mx-auto space-y-2">
           <div className="flex items-center justify-between text-xs text-white/70">
-            <label htmlFor="media-caption-input" className="font-medium">
-              Legenda da Foto
+            <label htmlFor="media-caption-input" className="font-semibold">
+              Legenda da Evidência
             </label>
             <div className="flex items-center gap-1">
               {isSavingCaption && (
-                <span className="flex items-center gap-1 text-blue-400">
+                <span className="flex items-center gap-1 text-primary-400 font-medium">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando...
                 </span>
               )}
               {captionSaved && (
-                <span className="flex items-center gap-1 text-emerald-400 animate-in fade-in">
+                <span className="flex items-center gap-1 text-emerald-400 font-medium animate-in fade-in">
                   <Check className="w-3.5 h-3.5" /> Salvo
                 </span>
               )}
@@ -263,7 +265,7 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
               disabled={readOnly}
               onChange={(e) => handleCaptionInput(e.target.value)}
               placeholder={readOnly ? 'Sem legenda' : 'Ex: Mancha de umidade próxima ao rodapé...'}
-              className="w-full px-4 py-2.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/40 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white/15 disabled:opacity-60 transition-all"
+              className="w-full min-h-[44px] px-4 py-2.5 bg-white/10 border border-white/20 rounded-2xl text-white placeholder-white/40 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:bg-white/15 disabled:opacity-60 transition-all"
             />
           </div>
         </div>

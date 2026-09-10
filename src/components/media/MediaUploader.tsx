@@ -93,8 +93,8 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
   return (
     <div className="w-full space-y-3">
-      {/* Botões de Ação Mobile-First */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Botões de Ação Mobile-First com Touch Target >= 48px */}
+      <div className="grid grid-cols-2 gap-2.5">
         {/* Input Câmera Nativa Mobile (prioriza traseira) */}
         <input
           ref={cameraInputRef}
@@ -109,9 +109,9 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           type="button"
           disabled={disabled}
           onClick={() => cameraInputRef.current?.click()}
-          className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-xl font-medium text-sm transition-all shadow-sm active:scale-[0.98]"
+          className="min-h-[48px] px-4 py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-slate-300 text-white rounded-2xl font-bold text-xs sm:text-sm transition-all shadow-md shadow-primary-600/20 active:scale-[0.98] flex items-center justify-center gap-2 select-none"
         >
-          <Camera className="w-4 h-4" />
+          <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
           <span>Tirar Foto</span>
         </button>
 
@@ -129,37 +129,37 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
           type="button"
           disabled={disabled}
           onClick={() => galleryInputRef.current?.click()}
-          className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 disabled:text-slate-400 text-slate-700 rounded-xl font-medium text-sm transition-all border border-slate-200 active:scale-[0.98]"
+          className="min-h-[48px] px-4 py-3 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 disabled:text-slate-400 text-slate-700 rounded-2xl font-bold text-xs sm:text-sm transition-all border border-slate-200 active:scale-[0.98] flex items-center justify-center gap-2 select-none"
         >
-          <ImageIcon className="w-4 h-4 text-slate-500" />
+          <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 text-slate-500" />
           <span>Galeria</span>
         </button>
       </div>
 
       {/* Alerta de Erro Local */}
       {localError && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-start gap-2 animate-in fade-in">
+        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-xs flex items-start gap-2 animate-in fade-in">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <div className="flex-1">{localError}</div>
-          <button onClick={() => setLocalError(null)} className="text-rose-500 hover:text-rose-700">
-            <X className="w-3.5 h-3.5" />
+          <button onClick={() => setLocalError(null)} className="min-w-[32px] min-h-[32px] flex items-center justify-center text-rose-500 hover:text-rose-700">
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
       {/* Fila de Upload Ativa */}
       {queue.length > 0 && (
-        <div className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+        <div className="space-y-2 bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-600 px-1">
             <span className="flex items-center gap-1.5">
-              <UploadCloud className="w-4 h-4 text-blue-500" />
+              <UploadCloud className="w-4 h-4 text-primary-600" />
               Fila de Upload ({queue.filter((q) => q.status === 'UPLOADED').length}/{queue.length})
             </span>
             {queue.some((q) => q.status === 'UPLOADED') && (
               <button
                 type="button"
                 onClick={() => mediaQueueService.clearCompleted()}
-                className="text-blue-600 hover:text-blue-700 font-medium"
+                className="text-primary-600 hover:text-primary-700 font-bold min-h-[36px] px-2"
               >
                 Limpar concluídos
               </button>
@@ -170,7 +170,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
             {queue.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200 shadow-xs text-xs relative overflow-hidden"
+                className="flex items-center gap-3 p-2.5 bg-white rounded-xl border border-slate-200 shadow-xs text-xs relative overflow-hidden"
               >
                 {/* Preview Thumbnail */}
                 <div className="w-12 h-12 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
@@ -179,7 +179,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
 
                 {/* Status e Detalhes */}
                 <div className="flex-1 min-w-0 pr-6">
-                  <p className="font-medium text-slate-800 truncate">{item.file.name}</p>
+                  <p className="font-semibold text-slate-800 truncate">{item.file.name}</p>
                   
                   <div className="flex items-center gap-1.5 mt-1">
                     {item.status === 'QUEUED' && (
@@ -189,7 +189,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                       <span className="text-amber-600 font-medium animate-pulse">Comprimindo...</span>
                     )}
                     {item.status === 'UPLOADING' && (
-                      <span className="text-blue-600 font-medium">Enviando {item.progress}%</span>
+                      <span className="text-primary-600 font-medium">Enviando {item.progress}%</span>
                     )}
                     {item.status === 'UPLOADED' && (
                       <span className="text-emerald-600 font-medium flex items-center gap-1">
@@ -210,7 +210,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                   {(item.status === 'COMPRESSING' || item.status === 'UPLOADING') && (
                     <div className="w-full bg-slate-100 rounded-full h-1.5 mt-1.5 overflow-hidden">
                       <div
-                        className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                        className="bg-primary-600 h-1.5 rounded-full transition-all duration-300"
                         style={{ width: `${item.progress}%` }}
                       />
                     </div>
@@ -224,7 +224,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                       type="button"
                       title="Tentar novamente"
                       onClick={() => handleRetry(item.id)}
-                      className="p-1 rounded-md bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors"
+                      className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                     </button>
@@ -234,7 +234,7 @@ export const MediaUploader: React.FC<MediaUploaderProps> = ({
                       type="button"
                       title="Cancelar"
                       onClick={() => handleCancel(item.id)}
-                      className="p-1 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                      className="min-w-[32px] min-h-[32px] flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>

@@ -8,7 +8,8 @@ import {
   Calendar, 
   MapPin, 
   Plus, 
-  ArrowRight
+  ArrowRight,
+  AlertTriangle
 } from 'lucide-react';
 import type { InspectionData, InspectionType } from '../types/inspection';
 import { getAllInspectionsFromDb, deleteInspectionFromDb } from '../services/db';
@@ -220,7 +221,10 @@ export const InspectionsHistoryModal: React.FC<InspectionsHistoryModalProps> = (
                         <span>Inquilino: <strong className="text-slate-300">{item.tenantName || 'N/I'}</strong></span>
                         <span>{item.rooms.length} cômodos • {totalItems} itens • {totalPhotos} fotos</span>
                         {repairsCount > 0 && (
-                          <span className="text-rose-400 font-bold">⚠️ {repairsCount} reparo(s)</span>
+                          <span className="text-rose-400 font-bold flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-rose-400 inline" />
+                            {repairsCount} reparo(s)
+                          </span>
                         )}
                       </div>
                     </div>

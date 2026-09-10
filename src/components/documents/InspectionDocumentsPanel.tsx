@@ -9,14 +9,12 @@ import {
   Printer, 
   Eye, 
   Plus, 
-  Loader2, 
-  AlertCircle, 
   ShieldCheck, 
-  CheckCircle2,
-  FileCheck2,
-  Send,
-  Users,
-  Award
+  CheckCircle2, 
+  FileCheck2, 
+  Send, 
+  Users, 
+  Award 
 } from 'lucide-react';
 import { 
   listInspectionDocuments, 
@@ -29,6 +27,10 @@ import { SignDocumentModal } from './SignDocumentModal';
 import { RequestSignatureModal } from './RequestSignatureModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
+import { Button } from '../ui/Button';
+import { Badge } from '../ui/Badge';
+import { Alert } from '../ui/Alert';
+import { Skeleton } from '../ui/Skeleton';
 
 interface InspectionDocumentsPanelProps {
   inspectionId: string;
@@ -137,92 +139,81 @@ export const InspectionDocumentsPanel: React.FC<InspectionDocumentsPanelProps> =
   };
 
   return (
-    <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-4">
+    <div className="bg-white rounded-card p-5 sm:p-6 border border-yzzy-border shadow-xs space-y-4 font-sans text-yzzy-text-primary">
+      
       {/* Header do Painel */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-yzzy-border/60">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-            <FileText className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-btn bg-primary-50 text-primary-700 flex items-center justify-center font-bold shrink-0">
+            <FileText className="w-5 h-5 text-primary-600" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm sm:text-base font-bold text-slate-900">
+              <h3 className="text-sm sm:text-base font-bold text-yzzy-text-primary">
                 Laudos Oficiais e Assinaturas
               </h3>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+              <Badge variant="primary" size="sm">
                 {documents.length} {documents.length === 1 ? 'documento' : 'documentos'}
-              </span>
+              </Badge>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Gestão de PDFs oficiais, snapshots imutáveis, assinaturas eletrônicas e relatórios periciais.
+            <p className="text-xs text-yzzy-text-secondary mt-0.5">
+              Gestão de PDFs com snapshot imutável, assinaturas eletrônicas e emissão pericial.
             </p>
           </div>
         </div>
 
         {/* Botão de Geração */}
         {isCompleted && canGenerate && !isViewer && (
-          <button
+          <Button
             type="button"
-            disabled={isGenerating}
+            variant="primary"
+            size="md"
+            isLoading={isGenerating}
             onClick={handleGenerate}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-blue-600/20 active:scale-95 transition-all"
+            leftIcon={<Plus className="w-4 h-4" />}
+            className="w-full sm:w-auto font-bold shadow-xs hover:shadow-subtle-blue"
           >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Compilando Laudo PDF...</span>
-              </>
-            ) : (
-              <>
-                <Plus className="w-4 h-4" />
-                <span>
-                  {documents.length === 0 ? 'Gerar Laudo Oficial' : `Gerar Nova Versão (v${documents.filter(d => d.document_type === 'INSPECTION_REPORT').length + 1})`}
-                </span>
-              </>
-            )}
-          </button>
+            {documents.length === 0 ? 'Gerar Laudo Oficial' : `Gerar Nova Versão (v${documents.filter(d => d.document_type === 'INSPECTION_REPORT').length + 1})`}
+          </Button>
         )}
       </div>
 
       {/* Alerta de Vistoria Aberta */}
       {!isCompleted && (
-        <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-800 flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+        <Alert type="warning">
           <span>
-            A geração de laudos oficiais e assinaturas é permitida somente após a <strong>finalização da vistoria (COMPLETED)</strong>.
+            A geração de laudos oficiais e assinaturas é permitida somente após a <strong>finalização da vistoria (Concluída)</strong>.
           </span>
-        </div>
+        </Alert>
       )}
 
       {/* Mensagens de Sucesso / Erro */}
       {successMessage && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 flex items-center gap-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+        <Alert type="success">
           <span>{successMessage}</span>
-        </div>
+        </Alert>
       )}
 
       {error && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-800 flex items-center gap-2 animate-in fade-in">
-          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+        <Alert type="error">
           <span>{error}</span>
-        </div>
+        </Alert>
       )}
 
       {/* Lista de Documentos */}
       {isLoading ? (
-        <div className="py-8 text-center text-slate-400">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
-          <p className="text-xs font-semibold">Carregando histórico de laudos e assinaturas...</p>
+        <div className="space-y-3 py-2">
+          <Skeleton className="h-16 w-full rounded-card" />
+          <Skeleton className="h-16 w-full rounded-card" />
         </div>
       ) : documents.length === 0 ? (
-        <div className="py-6 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
-          <FileText className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-          <p className="text-xs font-medium text-slate-600">Nenhum laudo oficial gerado ainda.</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">
+        <div className="py-8 text-center border-2 border-dashed border-yzzy-border rounded-card bg-surface-secondary/40 space-y-2">
+          <FileText className="w-8 h-8 mx-auto text-yzzy-text-muted" />
+          <p className="text-xs font-bold text-yzzy-text-primary">Nenhum laudo oficial gerado ainda.</p>
+          <p className="text-[11px] text-yzzy-text-muted max-w-sm mx-auto">
             {isCompleted
-              ? 'Clique no botão acima para compilar o primeiro laudo PDF.'
-              : 'Finalize a vistoria para habilitar a emissão do laudo.'}
+              ? 'Clique no botão acima para compilar o primeiro laudo PDF com snapshot imutável.'
+              : 'Conclua a vistoria para habilitar a emissão do laudo.'}
           </p>
         </div>
       ) : (
@@ -235,49 +226,49 @@ export const InspectionDocumentsPanel: React.FC<InspectionDocumentsPanelProps> =
             return (
               <div
                 key={doc.id}
-                className={`p-4 rounded-2xl border transition-all space-y-3 ${
+                className={`p-4 rounded-card border transition-all space-y-3 ${
                   isSignedReport
                     ? 'bg-emerald-50/40 border-emerald-200 shadow-xs'
                     : isLatest
-                    ? 'bg-blue-50/30 border-blue-200 shadow-xs'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
+                    ? 'bg-primary-50/20 border-primary-200 shadow-xs'
+                    : 'bg-white border-yzzy-border hover:border-slate-300'
                 }`}
               >
                 {/* Linha Principal do Documento */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs sm:text-sm font-bold text-slate-900">
+                      <span className="font-mono text-xs sm:text-sm font-bold text-yzzy-text-primary">
                         {doc.document_number}
                       </span>
                       
                       {isSignedReport ? (
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white flex items-center gap-1 shadow-xs">
-                          <Award className="w-3 h-3" /> Laudo Assinado (v{doc.version})
-                        </span>
+                        <Badge variant="success" size="sm" dot>
+                          <Award className="w-3 h-3 mr-1" /> Laudo Assinado (v{doc.version})
+                        </Badge>
                       ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                        <Badge variant="neutral" size="sm">
                           Versão {doc.version}
-                        </span>
+                        </Badge>
                       )}
 
                       {isLatest && !isSignedReport && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Atual
-                        </span>
+                        <Badge variant="primary" size="sm">
+                          Atual
+                        </Badge>
                       )}
 
                       {signaturesCount > 0 && !isSignedReport && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
-                          <FileCheck2 className="w-3 h-3" /> {signaturesCount} {signaturesCount === 1 ? 'assinatura' : 'assinaturas'}
-                        </span>
+                        <Badge variant="success" size="sm">
+                          <FileCheck2 className="w-3 h-3 mr-1" /> {signaturesCount} {signaturesCount === 1 ? 'assinatura' : 'assinaturas'}
+                        </Badge>
                       )}
                     </div>
 
-                    <p className="text-[11px] text-slate-500">
+                    <p className="text-[11px] text-yzzy-text-muted">
                       Emitido em {new Date(doc.generated_at).toLocaleString('pt-BR')} • {((doc.file_size || 0) / 1024).toFixed(0)} KB
                       {doc.checksum && (
-                        <span className="hidden md:inline font-mono text-[10px] text-slate-400 ml-2">
+                        <span className="hidden md:inline font-mono text-[10px] text-slate-500 ml-2">
                           (SHA-256: {doc.checksum.substring(0, 10)}...)
                         </span>
                       )}
@@ -286,55 +277,61 @@ export const InspectionDocumentsPanel: React.FC<InspectionDocumentsPanelProps> =
 
                   {/* Ações Primárias */}
                   <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setSelectedDoc(doc)}
-                      className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95"
+                      leftIcon={<Eye className="w-3.5 h-3.5 text-primary-600" />}
+                      className="text-xs font-bold"
                     >
-                      <Eye className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Visualizar</span>
-                    </button>
+                      Visualizar
+                    </Button>
 
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => handlePrint(doc)}
-                      className="p-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 transition-all active:scale-95"
+                      className="p-2"
                       title="Imprimir"
                     >
                       <Printer className="w-3.5 h-3.5" />
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => handleDownload(doc)}
-                      className="p-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 transition-all active:scale-95"
+                      className="p-2"
                       title="Baixar PDF"
                     >
                       <Download className="w-3.5 h-3.5" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
-                {/* Seção de Assinaturas e Ações Periciais (Para relatórios padrão) */}
+                {/* Seção de Assinaturas e Ações Periciais */}
                 {!isSignedReport && doc.document_status === 'READY' && (
-                  <div className="pt-2 border-t border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                  <div className="pt-2 border-t border-yzzy-border/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
                     {/* Listagem de Signatários Registrados */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                      <span className="text-[11px] font-bold text-yzzy-text-secondary uppercase flex items-center gap-1">
                         <Users className="w-3 h-3" /> Signatários:
                       </span>
 
                       {signaturesCount === 0 ? (
-                        <span className="text-xs text-slate-400 italic">Nenhuma assinatura registrada</span>
+                        <span className="text-xs text-yzzy-text-muted italic">Nenhuma assinatura registrada</span>
                       ) : (
                         doc.signatures?.map((s) => (
                           <span
                             key={s.id}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-[11px] text-slate-700 font-medium shadow-2xs"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-yzzy-border rounded-btn text-[11px] text-yzzy-text-primary font-medium shadow-2xs"
                           >
                             <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                             <strong>{s.signer_name}</strong>
-                            <span className="text-[10px] text-slate-400">({s.signer_type})</span>
+                            <span className="text-[10px] text-yzzy-text-muted">({s.signer_type})</span>
                           </span>
                         ))
                       )}
@@ -343,38 +340,40 @@ export const InspectionDocumentsPanel: React.FC<InspectionDocumentsPanelProps> =
                     {/* Botões de Assinatura */}
                     {!isViewer && (
                       <div className="flex items-center gap-2 w-full sm:w-auto justify-end pt-1 sm:pt-0">
-                        <button
+                        <Button
                           type="button"
+                          variant="success"
+                          size="sm"
                           onClick={() => setSigningDoc(doc)}
-                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95"
+                          leftIcon={<FileCheck2 className="w-3.5 h-3.5" />}
+                          className="text-xs font-bold"
                         >
-                          <FileCheck2 className="w-3.5 h-3.5" />
-                          <span>Assinar Laudo</span>
-                        </button>
+                          Assinar Laudo
+                        </Button>
 
-                        <button
+                        <Button
                           type="button"
+                          variant="secondary"
+                          size="sm"
                           onClick={() => setRequestingDoc(doc)}
-                          className="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95"
+                          leftIcon={<Send className="w-3.5 h-3.5" />}
+                          className="text-xs font-bold"
                         >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>Convidar Signatário</span>
-                        </button>
+                          Convidar Signatário
+                        </Button>
 
                         {signaturesCount > 0 && (
-                          <button
+                          <Button
                             type="button"
-                            disabled={isEmittingSigned}
+                            variant="primary"
+                            size="sm"
+                            isLoading={isEmittingSigned}
                             onClick={() => handleEmitSignedReport(doc)}
-                            className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95"
+                            leftIcon={<Award className="w-3.5 h-3.5 text-amber-400" />}
+                            className="text-xs font-bold"
                           >
-                            {isEmittingSigned ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Award className="w-3.5 h-3.5 text-amber-400" />
-                            )}
-                            <span>Emitir Laudo Assinado</span>
-                          </button>
+                            Emitir Laudo Assinado
+                          </Button>
                         )}
                       </div>
                     )}
@@ -387,7 +386,7 @@ export const InspectionDocumentsPanel: React.FC<InspectionDocumentsPanelProps> =
       )}
 
       {/* Nota de Auditoria e Imutabilidade */}
-      <div className="pt-2 border-t border-slate-100 text-[10px] text-slate-400 flex items-center gap-1.5">
+      <div className="pt-2 border-t border-yzzy-border/60 text-[10px] text-yzzy-text-muted flex items-center gap-1.5">
         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
         <span>
           Garantia de integridade documental e fé pública: assinaturas vinculadas criptograficamente ao SHA-256 de cada laudo.

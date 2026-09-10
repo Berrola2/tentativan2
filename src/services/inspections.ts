@@ -154,6 +154,38 @@ export async function getInspectionWithDetails(id: string): Promise<{
   };
 }
 
+export interface ActiveCheckinResult {
+  has_active_checkin: boolean;
+  active_inspection_id?: string;
+  inspector_name?: string;
+  status?: string;
+  created_at?: string;
+}
+
+export class DuplicateActiveCheckinError extends Error {
+  activeInspectionId?: string;
+  inspectorName?: string;
+  inspectionStatus?: string;
+
+  constructor(message: string, details?: { activeInspectionId?: string; inspectorName?: string; inspectionStatus?: string }) {
+    super(message);
+    this.name = 'DuplicateActiveCheckinError';
+    this.activeInspectionId = details?.activeInspectionId;
+    this.inspectorName = details?.inspectorName;
+    this.inspectionStatus = details?.inspectionStatus;
+  }
+}
+
+export async function checkActiveCheckin(propertyId: string): Promise<ActiveCheckinResult> {
+  const client = getSupabaseClient();
+  const { data, error } = await client.rpc('check_active_checkin', { p_property_id: propertyId });
+  if (error) {
+    console.error('[ERRO checkActiveCheckin]:', error.message);
+    return { has_active_checkin: false };
+  }
+  return (data || { has_active_checkin: false }) as ActiveCheckinResult;
+}
+
 export async function createInspection(input: CreateInspectionInput): Promise<Inspection> {
   const client = getSupabaseClient();
   const { data, error } = await client
@@ -175,6 +207,17 @@ export async function createInspection(input: CreateInspectionInput): Promise<In
 
   if (error) {
     console.error('[ERRO createInspection]:', error.message);
+    if (error.message.includes('DUPLICATE_ACTIVE_CHECKIN')) {
+      const activeInfo: ActiveCheckinResult = await checkActiveCheckin(input.property_id).catch((): ActiveCheckinResult => ({ has_active_checkin: false }));
+      throw new DuplicateActiveCheckinError(
+        'Já existe uma vistoria de entrada ativa para este imóvel.',
+        {
+          activeInspectionId: activeInfo.active_inspection_id,
+          inspectorName: activeInfo.inspector_name || 'Outro vistoriador',
+          inspectionStatus: activeInfo.status === 'IN_PROGRESS' ? 'Em andamento' : activeInfo.status === 'DRAFT' ? 'Rascunho' : 'Concluída (Aguardando Saída)',
+        }
+      );
+    }
     throw new Error(`Erro ao criar vistoria: ${error.message}`);
   }
 

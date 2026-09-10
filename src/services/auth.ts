@@ -1,5 +1,5 @@
 // ==============================================================================
-// SERVIÇO DE AUTENTICAÇÃO E GESTÃO RBAC — VISTORIA YZZY (ETAPA 02)
+// SERVIÇO DE AUTENTICAÇÃO E GESTÃO RBAC — VISTORIA YZZY (ETAPA 02 & CICLO DE SESSÃO)
 // ==============================================================================
 
 import { getSupabaseClient } from './supabaseClient';
@@ -14,6 +14,101 @@ import type {
   AuthActionResult, 
   UserRole 
 } from '../types/auth';
+
+export interface ValidTokenResult {
+  token: string | null;
+  error?: string;
+  isRevoked?: boolean;
+}
+
+/**
+ * Trata o encerramento seguro e local de sessão revogada/expirada sem disparar chamadas destrutivas desnecessárias.
+ */
+export async function handleRevokedSession(): Promise<void> {
+  const client = getSupabaseClient();
+  try {
+    // scope: 'local' limpa os dados locais do Supabase SDK sem tentar revogar no servidor o que já não existe
+    await client.auth.signOut({ scope: 'local' });
+  } catch (err) {
+    console.warn('[Auth] Limpeza local de sessão:', err);
+  }
+}
+
+/**
+ * Obtém um access_token válido, atualizado e ativo junto ao GoTrue (Supabase Auth).
+ * 1. Consulta getSession() do Supabase SDK.
+ * 2. Valida expiração com margem preventiva (30s) e executa refreshSession() se necessário.
+ * 3. Valida a sessão ativamente com o servidor GoTrue via getUser().
+ * 4. Retorna o access_token íntegro ou sinaliza revogação.
+ */
+export async function getValidAccessToken(): Promise<ValidTokenResult> {
+  const client = getSupabaseClient();
+
+  try {
+    // 1. Obter sessão atual persistida no Supabase SDK
+    const { data: { session }, error: sessionError } = await client.auth.getSession();
+
+    if (sessionError || !session || !session.access_token) {
+      await handleRevokedSession();
+      return {
+        token: null,
+        error: 'Sua sessão expirou ou foi encerrada. Entre novamente.',
+        isRevoked: true,
+      };
+    }
+
+    let currentSession = session;
+
+    // 2. Verificar expiração com margem de segurança de 30 segundos
+    const nowInSeconds = Math.floor(Date.now() / 1000);
+    const expiresAt = currentSession.expires_at || (nowInSeconds + (currentSession.expires_in || 3600));
+    const isExpiredOrSoon = (expiresAt - nowInSeconds) < 30;
+
+    if (isExpiredOrSoon && currentSession.refresh_token) {
+      console.log('[Auth] Token próximo da expiração, renovando sessão via refreshSession()...');
+      const { data: refreshed, error: refreshError } = await client.auth.refreshSession({
+        refresh_token: currentSession.refresh_token,
+      });
+
+      if (refreshError || !refreshed.session) {
+        console.warn('[Auth] Falha no refresh da sessão:', refreshError?.message);
+        await handleRevokedSession();
+        return {
+          token: null,
+          error: 'Sua sessão expirou ou foi encerrada. Entre novamente.',
+          isRevoked: true,
+        };
+      }
+      currentSession = refreshed.session;
+    }
+
+    // 3. Validar a sessão diretamente no GoTrue via getUser()
+    const { data: userData, error: userError } = await client.auth.getUser(currentSession.access_token);
+
+    if (userError || !userData?.user) {
+      const errMsg = userError?.message || '';
+      console.warn('[Auth] Sessão inválida ou revogada no GoTrue:', errMsg);
+
+      // Tratamento para sessão ausente/revogada no servidor
+      await handleRevokedSession();
+      return {
+        token: null,
+        error: 'Sua sessão expirou ou foi encerrada. Entre novamente.',
+        isRevoked: true,
+      };
+    }
+
+    return {
+      token: currentSession.access_token,
+    };
+  } catch (err) {
+    console.error('[Auth] Exceção em getValidAccessToken:', err);
+    return {
+      token: null,
+      error: 'Erro de validação de sessão. Tente novamente.',
+    };
+  }
+}
 
 /**
  * Realiza o login utilizando o Login YZZY (nome.sobrenome@empresa.yzzy) + senha
@@ -62,7 +157,7 @@ export async function loginWithYzzy(
 
     const { session: serverSession, user: userData } = data;
 
-    // Estabelece a sessão oficial no cliente Supabase JS
+    // 1. Estabelece a sessão oficial no cliente Supabase JS
     const { error: setSessionError } = await client.auth.setSession({
       access_token: serverSession.access_token,
       refresh_token: serverSession.refresh_token,
@@ -73,6 +168,19 @@ export async function loginWithYzzy(
       return {
         success: false,
         error: 'Falha ao inicializar a sessão segura. Tente novamente.',
+      };
+    }
+
+    // 2. Validação Imediata pós-setSession (getSession + getUser)
+    const { data: sessionCheck, error: sessionCheckErr } = await client.auth.getSession();
+    const { data: userCheck, error: userCheckErr } = await client.auth.getUser();
+
+    if (sessionCheckErr || !sessionCheck.session || userCheckErr || !userCheck.user) {
+      console.error('Falha na validação de integridade pós-setSession:', sessionCheckErr || userCheckErr);
+      await handleRevokedSession();
+      return {
+        success: false,
+        error: 'Falha na inicialização da sessão de autenticação.',
       };
     }
 
@@ -131,24 +239,26 @@ export async function logoutUser(): Promise<void> {
     await client.auth.signOut();
   } catch (err) {
     console.warn('Aviso durante signOut:', err);
+    await handleRevokedSession();
   }
 }
 
 /**
  * Altera a senha do usuário autenticado no primeiro acesso
+ * Revalida e persiste imediatamente a nova sessão ativa gerada pelo servidor.
  */
-export async function changeUserPassword(newPassword: string): Promise<AuthActionResult> {
+export async function changeUserPassword(newPassword: string): Promise<AuthActionResult<{ session?: any }>> {
   const client = getSupabaseClient();
   try {
-    const { data: { session }, error: sessionError } = await client.auth.getSession();
-    if (sessionError || !session?.access_token) {
-      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
     }
 
     const { data, error } = await client.functions.invoke('change-password', {
       body: { newPassword },
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${tokenResult.token}`,
       },
     });
 
@@ -168,7 +278,25 @@ export async function changeUserPassword(newPassword: string): Promise<AuthActio
       };
     }
 
-    return { success: true };
+    // Se o servidor retornou a nova sessão ativa pós-troca de senha, atualiza o SDK imediatamente
+    if (data.session && data.session.access_token) {
+      const { error: setSessionErr } = await client.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      if (setSessionErr) {
+        console.warn('Aviso ao sincronizar nova sessão após troca de senha:', setSessionErr.message);
+      } else {
+        // Validação imediata da nova sessão com getUser()
+        await client.auth.getUser();
+      }
+    }
+
+    return { 
+      success: true, 
+      data: { session: data.session || null },
+    };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Erro desconhecido';
     return { success: false, error: message };
@@ -234,15 +362,15 @@ export async function fetchCurrentUserData(userId: string): Promise<AuthUser | n
 export async function adminCreateCompany(payload: CreateCompanyPayload): Promise<AuthActionResult<{ company: Company; manager?: { loginAlias: string; tempPassword: string; fullName: string } }>> {
   const client = getSupabaseClient();
   try {
-    const { data: { session }, error: sessionError } = await client.auth.getSession();
-    if (sessionError || !session?.access_token) {
-      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
     }
 
     const { data, error } = await client.functions.invoke('admin-manage-user', {
       body: { action: 'create_company', ...payload },
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${tokenResult.token}`,
       },
     });
 
@@ -256,6 +384,12 @@ export async function adminCreateCompany(payload: CreateCompanyPayload): Promise
           // ignore
         }
       }
+
+      // Se o servidor retornar que a sessão está revogada/expirada, executa limpeza local
+      if (serverError?.includes('Sessão inválida') || serverError?.includes('sessão')) {
+        await handleRevokedSession();
+      }
+
       return { success: false, error: serverError || data?.error || error?.message || 'Falha ao cadastrar empresa.' };
     }
 
@@ -272,15 +406,15 @@ export async function adminCreateCompany(payload: CreateCompanyPayload): Promise
 export async function adminCreateEmployee(payload: CreateEmployeePayload): Promise<AuthActionResult<{ loginAlias: string; tempPassword: string; user: { id: string; fullName: string; role: UserRole } }>> {
   const client = getSupabaseClient();
   try {
-    const { data: { session }, error: sessionError } = await client.auth.getSession();
-    if (sessionError || !session?.access_token) {
-      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
     }
 
     const { data, error } = await client.functions.invoke('admin-manage-user', {
       body: { action: 'create_employee', ...payload },
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${tokenResult.token}`,
       },
     });
 
@@ -294,6 +428,11 @@ export async function adminCreateEmployee(payload: CreateEmployeePayload): Promi
           // ignore
         }
       }
+
+      if (serverError?.includes('Sessão inválida') || serverError?.includes('sessão')) {
+        await handleRevokedSession();
+      }
+
       return { success: false, error: serverError || data?.error || error?.message || 'Falha ao cadastrar funcionário.' };
     }
 
@@ -305,20 +444,20 @@ export async function adminCreateEmployee(payload: CreateEmployeePayload): Promi
 }
 
 /**
- * Ativar / Desativar funcionário
+ * SUPER_ADMIN: Desativar / Reativar Empresa (Soft Deactivation)
  */
-export async function adminToggleUserStatus(targetUserId: string, active: boolean): Promise<AuthActionResult> {
+export async function adminToggleCompanyStatus(targetCompanyId: string, active: boolean, reason?: string): Promise<AuthActionResult> {
   const client = getSupabaseClient();
   try {
-    const { data: { session }, error: sessionError } = await client.auth.getSession();
-    if (sessionError || !session?.access_token) {
-      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
     }
 
     const { data, error } = await client.functions.invoke('admin-manage-user', {
-      body: { action: 'toggle_user_status', targetUserId, active },
+      body: { action: 'toggle_company_status', targetCompanyId, active, reason },
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${tokenResult.token}`,
       },
     });
 
@@ -332,6 +471,54 @@ export async function adminToggleUserStatus(targetUserId: string, active: boolea
           // ignore
         }
       }
+
+      if (serverError?.includes('Sessão inválida') || serverError?.includes('sessão')) {
+        await handleRevokedSession();
+      }
+
+      return { success: false, error: serverError || data?.error || error?.message || 'Falha ao alterar status da empresa.' };
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Erro ao alterar status da empresa';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Ativar / Desativar funcionário (Demissão / Afastamento)
+ */
+export async function adminToggleUserStatus(targetUserId: string, active: boolean, reason?: string): Promise<AuthActionResult> {
+  const client = getSupabaseClient();
+  try {
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
+    const { data, error } = await client.functions.invoke('admin-manage-user', {
+      body: { action: 'toggle_user_status', targetUserId, active, reason },
+      headers: {
+        Authorization: `Bearer ${tokenResult.token}`,
+      },
+    });
+
+    if (error || !data?.success) {
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (serverError?.includes('Sessão inválida') || serverError?.includes('sessão')) {
+        await handleRevokedSession();
+      }
+
       return { success: false, error: serverError || data?.error || error?.message || 'Falha ao alterar status do funcionário.' };
     }
 
@@ -343,20 +530,20 @@ export async function adminToggleUserStatus(targetUserId: string, active: boolea
 }
 
 /**
- * Alterar cargo de funcionário
+ * SUPER_ADMIN: Execução de ações de manutenção / auditoria
  */
-export async function adminChangeUserRole(targetUserId: string, newRole: UserRole): Promise<AuthActionResult> {
+export async function adminExecuteMaintenanceAction(action: string, confirmationPhrase?: string): Promise<AuthActionResult> {
   const client = getSupabaseClient();
   try {
-    const { data: { session }, error: sessionError } = await client.auth.getSession();
-    if (sessionError || !session?.access_token) {
-      return { success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' };
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
     }
 
     const { data, error } = await client.functions.invoke('admin-manage-user', {
-      body: { action: 'change_user_role', targetUserId, newRole },
+      body: { action, confirmationPhrase },
       headers: {
-        Authorization: `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${tokenResult.token}`,
       },
     });
 
@@ -370,6 +557,50 @@ export async function adminChangeUserRole(targetUserId: string, newRole: UserRol
           // ignore
         }
       }
+
+      return { success: false, error: serverError || data?.error || error?.message || 'Falha na ação de manutenção.' };
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Erro na ação de manutenção';
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Alterar cargo de funcionário
+ */
+export async function adminChangeUserRole(targetUserId: string, newRole: UserRole): Promise<AuthActionResult> {
+  const client = getSupabaseClient();
+  try {
+    const tokenResult = await getValidAccessToken();
+    if (!tokenResult.token) {
+      return { success: false, error: tokenResult.error || 'Sessão inválida ou expirada. Faça login novamente.' };
+    }
+
+    const { data, error } = await client.functions.invoke('admin-manage-user', {
+      body: { action: 'change_user_role', targetUserId, newRole },
+      headers: {
+        Authorization: `Bearer ${tokenResult.token}`,
+      },
+    });
+
+    if (error || !data?.success) {
+      let serverError: string | undefined;
+      if (error && (error as any).context && typeof (error as any).context.json === 'function') {
+        try {
+          const errBody = await (error as any).context.json();
+          serverError = errBody?.error;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (serverError?.includes('Sessão inválida') || serverError?.includes('sessão')) {
+        await handleRevokedSession();
+      }
+
       return { success: false, error: serverError || data?.error || error?.message || 'Falha ao alterar cargo do funcionário.' };
     }
 

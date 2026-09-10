@@ -11,8 +11,10 @@ import {
   Layers,
   FileText,
   ShieldCheck,
-  Check
+  Check,
+  AlertCircle
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { networkState, type NetworkStatus } from '../../services/networkState';
 import { syncEngine, type SyncProgressReport } from '../../services/syncEngine';
 import {
@@ -22,7 +24,6 @@ import {
   clearOfflineStorageForUser,
   type SyncQueueOperation
 } from '../../services/offlineDb';
-
 
 interface SyncCenterModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
   onClose,
   onOpenConflicts
 }) => {
+  const { isSuperAdmin } = useAuth();
   const [netStatus, setNetStatus] = useState<NetworkStatus>(networkState.getStatus());
   const [latency, setLatency] = useState<number>(0);
   const [syncReport, setSyncReport] = useState<SyncProgressReport>({
@@ -63,6 +65,11 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
 
   const [isClearing, setIsClearing] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+
+  // Confirmação forte com palavra-chave digitada
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
+  const [typedKeyword, setTypedKeyword] = useState('');
+  const [clearError, setClearError] = useState<string | null>(null);
 
   const loadData = async () => {
     const ops = await offlineDb.sync_queue
@@ -119,23 +126,27 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
     setTimeout(() => setFeedbackMsg(null), 3000);
   };
 
-  const handleClearCache = async () => {
-    if (pendingOps.length > 0) {
-      const confirmForce = window.confirm(
-        `ATENÇÃO: Existem ${pendingOps.length} alteraçõe(s) pendentes no dispositivo que ainda NÃO foram enviadas ao servidor. Se continuar, esse trabalho local será PERDIDO. Deseja realmente limpar?`
-      );
-      if (!confirmForce) return;
-    } else {
-      const confirmSimple = window.confirm('Deseja limpar os dados locais em cache das vistorias finalizadas?');
-      if (!confirmSimple) return;
+  const handleExecuteClearDatabase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (typedKeyword.trim().toUpperCase() !== 'LIMPAR') {
+      setClearError('Digite exatamente a palavra LIMPAR para confirmar.');
+      return;
     }
 
     setIsClearing(true);
-    await clearOfflineStorageForUser(false);
-    setIsClearing(false);
-    setFeedbackMsg('Armazenamento local limpo com sucesso.');
-    loadData();
-    setTimeout(() => setFeedbackMsg(null), 3000);
+    setClearError(null);
+    try {
+      await clearOfflineStorageForUser(false);
+      setShowClearConfirmModal(false);
+      setTypedKeyword('');
+      setFeedbackMsg('Armazenamento local limpo com sucesso.');
+      await loadData();
+      setTimeout(() => setFeedbackMsg(null), 3000);
+    } catch (err: any) {
+      setClearError(err.message || 'Erro ao limpar armazenamento local.');
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   // Contadores por tipo de entidade
@@ -313,7 +324,6 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
             </div>
           </div>
 
-
           {/* Princípio de Segurança */}
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start space-x-2">
             <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
@@ -325,14 +335,23 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
 
         {/* Footer Actions */}
         <div className="bg-slate-50 px-5 py-4 border-t border-slate-200 flex items-center justify-between">
-          <button
-            onClick={handleClearCache}
-            disabled={isClearing}
-            className="flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 font-semibold px-3 py-2 rounded-lg hover:bg-rose-50 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Limpar Dados Locais</span>
-          </button>
+          {/* Ação de Limpeza de Database / Cache Local EXCLUSIVA para Super Admin */}
+          {isSuperAdmin ? (
+            <button
+              onClick={() => {
+                setTypedKeyword('');
+                setClearError(null);
+                setShowClearConfirmModal(true);
+              }}
+              disabled={isClearing}
+              className="flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 font-semibold px-3 py-2 rounded-lg hover:bg-rose-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Limpar Dados Locais</span>
+            </button>
+          ) : (
+            <div />
+          )}
 
           <div className="flex items-center space-x-2">
             <button
@@ -353,6 +372,75 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Modal Forte de Confirmação para Limpeza de Database / Dados Locais (Super Admin) */}
+      {showClearConfirmModal && (
+        <div className="fixed inset-0 z-60 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-rose-200 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-lg font-black text-slate-900">Limpar Banco de Dados Local</h3>
+              <p className="text-xs text-slate-600">
+                Esta ação apagará todo o cache local e IndexedDB do dispositivo.
+                {pendingOps.length > 0 && (
+                  <strong className="block text-rose-600 font-bold mt-1">
+                    ATENÇÃO: Existem {pendingOps.length} alteração(ões) pendente(s) não sincronizadas que serão PERDIDAS.
+                  </strong>
+                )}
+              </p>
+            </div>
+
+            {clearError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{clearError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteClearDatabase} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                  Digite <span className="text-rose-600 font-black">LIMPAR</span> para confirmar:
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="LIMPAR"
+                  value={typedKeyword}
+                  onChange={(e) => setTypedKeyword(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-rose-300 rounded-xl text-xs font-mono font-bold focus:ring-2 focus:ring-rose-600 uppercase"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowClearConfirmModal(false);
+                    setTypedKeyword('');
+                    setClearError(null);
+                  }}
+                  className="w-1/2 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isClearing || typedKeyword.trim().toUpperCase() !== 'LIMPAR'}
+                  className="w-1/2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-rose-600/20"
+                >
+                  {isClearing ? 'Limpando...' : 'Confirmar Limpeza'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

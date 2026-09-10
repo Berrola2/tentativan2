@@ -201,10 +201,22 @@ serve(async (req: Request) => {
 
     // 5. Validar Perfil e Empresa Ativos
     if (!identityUser.active) {
-      console.warn(`[CID:${correlationId}] [USER_INACTIVE] Usuário ${userId} está desativado.`);
+      console.warn(`[CID:${correlationId}] [USER_INACTIVE] Usuário ${userId} (${identityUser.role}) está inativo.`);
+      const isManager = identityUser.role === 'ROLE_MANAGER';
+      const userInactiveMsg = isManager
+        ? 'Seu acesso está inativo. Entre em contato com o Super Administrador YZZY.'
+        : 'Seu acesso está inativo. Entre em contato com o gerente da sua empresa.';
+
+      await supabaseAdmin.from('security_audit_logs').insert({
+        company_id: identityUser.company_id,
+        event_type: 'LOGIN_BLOCKED_USER_INACTIVE',
+        ip_address: clientIp,
+        metadata: { login_attempt: cleanLogin, correlation_id: correlationId, role: identityUser.role },
+      });
+
       return new Response(
-        JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
-        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: userInactiveMsg, code: 'USER_INACTIVE' }),
+        { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -212,9 +224,21 @@ serve(async (req: Request) => {
 
     if (identityUser.company_id && !identityUser.company_active) {
       console.warn(`[CID:${correlationId}] [COMPANY_INACTIVE] Empresa ${identityUser.company_id} está inativa.`);
+      const isManager = identityUser.role === 'ROLE_MANAGER';
+      const companyInactiveMsg = isManager
+        ? 'Sua empresa está inativa no Vistoria YZZY. Entre em contato com o Super Administrador YZZY.'
+        : 'O acesso da sua empresa está temporariamente indisponível. Entre em contato com o gerente da sua empresa.';
+
+      await supabaseAdmin.from('security_audit_logs').insert({
+        company_id: identityUser.company_id,
+        event_type: 'LOGIN_BLOCKED_COMPANY_INACTIVE',
+        ip_address: clientIp,
+        metadata: { login_attempt: cleanLogin, correlation_id: correlationId, role: identityUser.role },
+      });
+
       return new Response(
-        JSON.stringify({ success: false, error: 'Login ou senha inválidos.' }),
-        { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: false, error: companyInactiveMsg, code: 'COMPANY_INACTIVE' }),
+        { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } }
       );
     }
 

@@ -210,6 +210,7 @@ export async function listPropertyComparisons(
       .from('inspection_comparisons')
       .select(`
         *,
+        property:properties(id, street, number, complement, neighborhood, city, state),
         check_in_inspection:inspections!fk_insp_comp_checkin(id, inspection_type, inspection_date, status),
         check_out_inspection:inspections!fk_insp_comp_checkout(id, inspection_type, inspection_date, status)
       `)
@@ -218,6 +219,32 @@ export async function listPropertyComparisons(
 
     if (error) {
       console.error('[ComparisonService] Erro ao listar comparações do imóvel:', error.message);
+      return [];
+    }
+
+    return (data || []) as InspectionComparison[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Lista todas as comparações da empresa com dados do imóvel e das vistorias.
+ */
+export async function listAllCompanyComparisons(): Promise<InspectionComparison[]> {
+  try {
+    const { data, error } = await supabase
+      .from('inspection_comparisons')
+      .select(`
+        *,
+        property:properties(id, street, number, complement, neighborhood, city, state),
+        check_in_inspection:inspections!fk_insp_comp_checkin(id, inspection_type, inspection_date, status),
+        check_out_inspection:inspections!fk_insp_comp_checkout(id, inspection_type, inspection_date, status)
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[ComparisonService] Erro ao listar comparações da empresa:', error.message);
       return [];
     }
 

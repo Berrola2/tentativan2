@@ -111,6 +111,7 @@ serve(async (req: Request) => {
     // 2. Atualizar senha no Supabase Auth
     const { error: updateAuthErr } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
       password: newPassword,
+      email_confirm: true,
     });
 
     if (updateAuthErr) {
@@ -133,8 +134,43 @@ serve(async (req: Request) => {
       metadata: { action: 'first_access_or_self_reset' },
     });
 
+    // 5. Reautenticar imediatamente para gerar nova sessão ativa válida (evita session revogada no GoTrue)
+    let newSession = null;
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_PUBLISHABLE_KEY') || '';
+
+    if (user.email && anonKey) {
+      try {
+        const authClient = createClient(supabaseUrl, anonKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+
+        const { data: authData, error: signInErr } = await authClient.auth.signInWithPassword({
+          email: user.email,
+          password: newPassword,
+        });
+
+        if (authData?.session) {
+          newSession = {
+            access_token: authData.session.access_token,
+            refresh_token: authData.session.refresh_token,
+            expires_in: authData.session.expires_in,
+            expires_at: authData.session.expires_at,
+            token_type: authData.session.token_type,
+          };
+        } else if (signInErr) {
+          console.warn('[change-password] Alerta na reautenticação imediata:', signInErr.message);
+        }
+      } catch (authEx) {
+        console.warn('[change-password] Exceção na reautenticação:', authEx);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ success: true, message: 'Senha atualizada com sucesso!' }),
+      JSON.stringify({
+        success: true,
+        message: 'Senha atualizada com sucesso!',
+        session: newSession,
+      }),
       { status: 200, headers: { ...cors, 'Content-Type': 'application/json' } }
     );
   } catch (err: unknown) {

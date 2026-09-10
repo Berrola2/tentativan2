@@ -561,3 +561,63 @@ export async function generateAndRegisterSignedReport(documentId: string): Promi
     };
   }
 }
+
+/**
+  * Lista todos os documentos oficiais da empresa com dados da vistoria e imóvel.
+  */
+export async function listAllCompanyDocuments(): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from('inspection_documents')
+      .select(`
+        *,
+        inspection:inspections (
+          id,
+          title,
+          inspection_type,
+          status,
+          property:properties (
+            id,
+            street,
+            number,
+            complement,
+            neighborhood,
+            city,
+            state
+          )
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[DocumentService] Erro ao listar laudos da empresa:', error.message);
+      return [];
+    }
+
+    const docs = data || [];
+    const enriched = await Promise.all(
+      docs.map(async (doc: any) => {
+        let signedUrl: string | undefined;
+        if (doc.document_status === 'READY' && doc.storage_path) {
+          const { data: sData } = await supabase.storage
+            .from('inspection-documents')
+            .createSignedUrl(doc.storage_path, 900);
+          signedUrl = sData?.signedUrl;
+        }
+
+        const signatures = await listDocumentSignatures(doc.id);
+
+        return {
+          ...doc,
+          signed_url: signedUrl,
+          signatures
+        };
+      })
+    );
+
+    return enriched;
+  } catch {
+    return [];
+  }
+}
+

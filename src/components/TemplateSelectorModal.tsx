@@ -7,7 +7,8 @@ import {
   LayoutGrid, 
   Briefcase, 
   PlusSquare, 
-  ChevronRight 
+  ChevronRight,
+  Lightbulb
 } from 'lucide-react';
 import { INSPECTION_TEMPLATES } from '../data/templates';
 import type { QuickTemplate } from '../types/inspection';
@@ -65,9 +66,12 @@ export const TemplateSelectorModal: React.FC<TemplateSelectorModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 overflow-y-auto space-y-3 flex-1">
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-2xl">
-            💡 <strong>Dica:</strong> Escolher um modelo criará os cômodos padrão para economizar tempo. Você poderá adicionar, renomear ou excluir qualquer ambiente.
-          </p>
+          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-3 rounded-2xl flex items-start gap-2">
+            <Lightbulb className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <p>
+              <strong>Dica:</strong> Escolher um modelo criará os cômodos padrão para economizar tempo. Você poderá adicionar, renomear ou excluir qualquer ambiente.
+            </p>
+          </div>
 
           <div className="space-y-3 pt-1">
             {INSPECTION_TEMPLATES.map((template) => (

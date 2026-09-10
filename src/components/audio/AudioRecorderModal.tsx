@@ -118,7 +118,7 @@ export const AudioRecorderModal: React.FC<AudioRecorderModalProps> = ({
         {/* Header com contexto */}
         <div className="w-full flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="text-left">
-            <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 block">
+            <span className="text-[10px] font-black uppercase tracking-wider text-primary-600 block">
               {roomName || 'Ambiente'}
             </span>
             <h3 className="text-sm font-black text-slate-900 truncate max-w-[240px]">
@@ -127,7 +127,8 @@ export const AudioRecorderModal: React.FC<AudioRecorderModalProps> = ({
           </div>
           <button
             onClick={handleCancel}
-            className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+            title="Fechar"
           >
             <X className="w-5 h-5" />
           </button>
@@ -142,7 +143,7 @@ export const AudioRecorderModal: React.FC<AudioRecorderModalProps> = ({
             <p className="text-xs font-medium text-rose-600 px-4">{error}</p>
             <button
               onClick={handleCancel}
-              className="w-full py-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors"
+              className="w-full min-h-[48px] py-3 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors"
             >
               Fechar
             </button>
@@ -175,7 +176,7 @@ export const AudioRecorderModal: React.FC<AudioRecorderModalProps> = ({
             {/* Transcrição em Tempo Real */}
             <div className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-left min-h-[70px] max-h-[120px] overflow-y-auto">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1">
-                <Sparkles className="w-3 h-3 text-blue-500" /> Transcrição em Tempo Real
+                <Sparkles className="w-3 h-3 text-primary-600" /> Transcrição em Tempo Real
               </span>
               <p className="text-xs text-slate-700 italic leading-relaxed">
                 {liveTranscript || 'Ouvindo sua fala...'}
@@ -187,7 +188,7 @@ export const AudioRecorderModal: React.FC<AudioRecorderModalProps> = ({
               <button
                 type="button"
                 onClick={handleCancel}
-                className="w-1/2 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 active:scale-95 transition-all"
+                className="w-1/2 min-h-[48px] py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50 active:scale-95 transition-all flex items-center justify-center"
               >
                 Cancelar
               </button>
@@ -196,7 +197,7 @@ export const AudioRecorderModal: React.FC<AudioRecorderModalProps> = ({
                 type="button"
                 disabled={isStarting || isFinishing}
                 onClick={handleFinish}
-                className="w-1/2 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 active:scale-95 transition-all"
+                className="w-1/2 min-h-[48px] py-3 rounded-xl bg-primary-600 hover:bg-primary-700 disabled:bg-slate-300 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-primary-600/20 active:scale-95 transition-all"
               >
                 {isFinishing ? (
                   <>

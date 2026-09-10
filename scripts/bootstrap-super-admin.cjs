@@ -51,14 +51,26 @@ function generateSecureTempPassword() {
 }
 
 async function bootstrapSuperAdmin() {
-  const isResetMode = process.argv.includes('--reset-password') || process.argv.includes('--reset');
+  const isResetMode = process.argv.some(arg => arg === '--reset-password' || arg === '--reset' || arg.startsWith('--reset-password=') || arg.startsWith('--reset='));
   const isAuditMode = process.argv.includes('--audit') || process.argv.includes('--check');
-  const customPasswordArg = process.argv.find(arg => !arg.startsWith('--') && arg !== process.argv[0] && arg !== process.argv[1]);
+  
+  let customPasswordArg = null;
+  if (isResetMode) {
+    const inlineArg = process.argv.find(arg => arg.startsWith('--reset-password=') || arg.startsWith('--reset='));
+    if (inlineArg) {
+      customPasswordArg = inlineArg.split('=')[1];
+    } else {
+      const idx = process.argv.findIndex(arg => arg === '--reset-password' || arg === '--reset');
+      if (idx !== -1 && process.argv[idx + 1] && !process.argv[idx + 1].startsWith('--')) {
+        customPasswordArg = process.argv[idx + 1];
+      }
+    }
+  }
 
   console.log('====================================================================');
   console.log('🚀 VISTORIA YZZY — GESTÃO & BOOTSTRAP DO SUPER ADMIN (CANÔNICO)');
   console.log('Endpoint:', supabaseUrl);
-  console.log('Modo    :', isResetMode ? 'REDEFINIÇÃO DE SENHA (--reset-password)' : isAuditMode ? 'AUDITORIA (--audit)' : 'PROVISIONAMENTO / VERIFICAÇÃO');
+  console.log('Modo    :', isResetMode ? 'REDEFINIÇÃO DE SENHA (--reset-password)' : isAuditMode ? 'AUDITORIA (--audit)' : 'READ-ONLY (PADRÃO SEGURO)');
   console.log('====================================================================\n');
 
   if (!secretKey) {
@@ -113,13 +125,15 @@ async function bootstrapSuperAdmin() {
       console.log(`   - Alias Login YZZY   : ${identityData ? defaultLoginAlias : 'Não cadastrado'}`);
       console.log(`   - Integridade Vínculo: ${isConsistent ? '✅ 100% ÍNTEGRO' : '⚠️ Vínculo parcial'}\n`);
 
-      if (isAuditMode) {
-        console.log('Auditoria concluída com sucesso.');
+      if (isAuditMode || !isResetMode) {
+        console.log('🔒 Modo de execução seguro: Nenhuma credencial foi alterada.');
+        console.log('💡 Dica: Para redefinir explicitamente a senha do Super Admin, execute:');
+        console.log('   node scripts/bootstrap-super-admin.cjs --reset-password [nova_senha_opcional]\n');
         return;
       }
 
-      // Se solicitado reset ou provisionamento com usuário já existente
-      if (isResetMode || customPasswordArg) {
+      // Se solicitado reset explicitamente (--reset-password)
+      if (isResetMode) {
         const tempPassword = customPasswordArg || generateSecureTempPassword();
 
         console.log(`🔄 Iniciando redefinição de senha para o Super Admin (${targetUserId})...`);

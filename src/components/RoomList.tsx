@@ -95,7 +95,7 @@ export const RoomList: React.FC<RoomListProps> = ({
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
                   isActive ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-600'
                 }`}>
-                  {room.items.length} {room.items.length === 1 ? 'item' : 'itens'}{totalPhotos > 0 ? ` • ${totalPhotos}📷` : ''}
+                  {room.items.length} {room.items.length === 1 ? 'item' : 'itens'}{totalPhotos > 0 ? ` • ${totalPhotos} fotos` : ''}
                 </span>
 
                 {/* Repair needed indicator */}

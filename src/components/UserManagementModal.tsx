@@ -6,6 +6,7 @@ import {
   Loader2,
   Copy,
   Check,
+  CheckCircle2,
   ToggleLeft,
   ToggleRight
 } from 'lucide-react';
@@ -205,7 +206,10 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
           {createdResult && (
             <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-800">✅ Novo Colaborador Provisionado</span>
+                <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" />
+                  Novo Colaborador Provisionado
+                </span>
                 <button
                   type="button"
                   onClick={copyCredentials}
